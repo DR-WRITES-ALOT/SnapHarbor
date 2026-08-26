@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar, NavTab } from "./components/layout/Sidebar";
 import { Dashboard } from "./components/layout/Dashboard";
+import { GalleryView } from "./components/layout/GalleryView";
 import { StorageView } from "./components/layout/StorageView";
 import { SettingsView } from "./components/layout/SettingsView";
 import { SyncProvider } from "./context/SyncContext";
@@ -42,6 +43,19 @@ function AppContent() {
               className="w-full h-full"
             >
               <Dashboard onNavigateToSettings={() => setActiveTab("settings")} />
+            </motion.div>
+          )}
+
+          {activeTab === "gallery" && (
+            <motion.div
+              key="gallery"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="w-full h-full"
+            >
+              <GalleryView />
             </motion.div>
           )}
 

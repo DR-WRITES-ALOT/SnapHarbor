@@ -11,7 +11,12 @@ use sync_engine::{
     calculate_file_sha256, copy_media_file_safe, generate_destination_path,
     scan_directory_media, DiscoveredMediaFile, ScanSummary, SyncProgressEvent,
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, State, WindowEvent,
+};
+use tauri_plugin_notification::NotificationExt;
 use wpd::{DeviceInfo, WpdManager};
 
 // Shared application state
@@ -40,6 +45,8 @@ fn get_app_settings(state: State<'_, AppState>) -> Result<HashMap<String, String
         "delete_after_sync",
         "skip_duplicates",
         "include_videos",
+        "enable_notifications",
+        "minimize_to_tray",
     ];
 
     let mut map = HashMap::new();
@@ -80,6 +87,44 @@ fn get_recent_media(
 }
 
 #[tauri::command]
+fn get_vault_gallery(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+    device_id: Option<String>,
+    favorites_only: Option<bool>,
+) -> Result<Vec<SyncedMediaItem>, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::get_synced_media(
+        conn,
+        limit,
+        device_id.as_deref(),
+        favorites_only.unwrap_or(false),
+    ).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn toggle_media_favorite(
+    state: State<'_, AppState>,
+    media_id: i64,
+) -> Result<bool, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::toggle_favorite(conn, media_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_sync_history(state: State<'_, AppState>) -> Result<bool, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::clear_all_sync_history(conn).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
 fn scan_device_media(
     state: State<'_, AppState>,
     device_id: String,
@@ -99,7 +144,6 @@ fn scan_device_media(
 
     // If no files found from source path (e.g. simulated or virtual device)
     if discovered.is_empty() {
-        // Generate simulated media previews
         for i in 1..=24 {
             let is_video = i % 5 == 0;
             let size = if is_video { 45_000_000 + i * 2_500_000 } else { 3_500_000 + i * 400_000 };
@@ -126,14 +170,30 @@ fn scan_device_media(
 }
 
 #[tauri::command]
+fn send_desktop_notification(
+    app: AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    let _ = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_sync(
     app: AppHandle,
     state: State<'_, AppState>,
     device_id: String,
     device_name: String,
     source_path: Option<String>,
+    selected_file_names: Option<Vec<String>>,
 ) -> Result<usize, String> {
-    let (dest_dir, date_format, skip_dupes, include_videos) = {
+    let (dest_dir, date_format, skip_dupes, include_videos, notify_enabled) = {
         let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
         let conn = lock.as_ref().ok_or("Database not initialized")?;
 
@@ -141,9 +201,10 @@ async fn start_sync(
         let df = db::get_setting(conn, "date_format", "YYYY/MM");
         let sd = db::get_setting(conn, "skip_duplicates", "true") == "true";
         let iv = db::get_setting(conn, "include_videos", "true") == "true";
+        let ne = db::get_setting(conn, "enable_notifications", "true") == "true";
 
         db::register_or_update_device(conn, &device_id, &device_name, None).ok();
-        (dest, df, sd, iv)
+        (dest, df, sd, iv, ne)
     };
 
     let dest_path = PathBuf::from(&dest_dir);
@@ -156,7 +217,16 @@ async fn start_sync(
     if let Some(ref sp) = source_path {
         let p = PathBuf::from(sp);
         if p.exists() {
-            files_to_sync = scan_directory_media(&p, include_videos);
+            let all_files = scan_directory_media(&p, include_videos);
+            if let Some(ref selection) = selected_file_names {
+                if !selection.is_empty() {
+                    files_to_sync = all_files.into_iter().filter(|f| selection.contains(&f.name)).collect();
+                } else {
+                    files_to_sync = all_files;
+                }
+            } else {
+                files_to_sync = all_files;
+            }
         }
     }
 
@@ -228,34 +298,51 @@ async fn start_sync(
             );
         }
 
+        if notify_enabled {
+            let _ = app
+                .notification()
+                .builder()
+                .title("SnapHarbor Sync Complete")
+                .body(format!("Successfully backed up {} media files to vault.", synced_count))
+                .show();
+        }
+
         return Ok(synced_count);
     }
 
     // Otherwise, simulate live sync for connected virtual/MTP phone
-    let total_files = 16;
-    let total_bytes: u64 = 520_000_000;
+    let target_names: Vec<String> = if let Some(selection) = selected_file_names {
+        if !selection.is_empty() {
+            selection
+        } else {
+            (1..=16).map(|i| format!("IMG_{:04}.JPG", 2040 + i)).collect()
+        }
+    } else {
+        (1..=16).map(|i| format!("IMG_{:04}.JPG", 2040 + i)).collect()
+    };
+
+    let total_files = target_names.len();
+    let file_unit_size = 32_500_000u64;
+    let total_bytes: u64 = total_files as u64 * file_unit_size;
     let mut copied_bytes: u64 = 0;
 
-    for i in 1..=total_files {
+    for (i, file_name) in target_names.iter().enumerate() {
         tokio_or_std_sleep(120);
 
-        let file_name = format!("IMG_{:04}.JPG", 2040 + i);
-        let file_size = 32_500_000u64;
-        copied_bytes += file_size;
+        copied_bytes += file_unit_size;
+        let percent = (((i + 1) as f64 / total_files as f64) * 100.0) as u32;
 
-        let percent = (((i) as f64 / total_files as f64) * 100.0) as u32;
-
-        // Record dummy sync in database
+        // Record sync in database
         {
             let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
             if let Some(conn) = lock.as_ref() {
-                let target = dest_path.join("2026").join("08").join(&file_name);
+                let target = dest_path.join("2026").join("08").join(file_name);
                 let record = NewSyncedMedia {
                     device_id: device_id.clone(),
                     remote_object_id: None,
                     remote_path: Some(format!("/DCIM/Camera/{}", file_name)),
                     local_path: target.to_string_lossy().to_string(),
-                    file_size_bytes: file_size as i64,
+                    file_size_bytes: file_unit_size as i64,
                     file_hash_sha256: format!("sim_hash_{:x}_{}", i, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
                     media_created_at: Some(chrono::Utc::now().to_rfc3339()),
                 };
@@ -266,17 +353,26 @@ async fn start_sync(
         let _ = app.emit(
             "sync://progress",
             SyncProgressEvent {
-                current_file: file_name,
-                current_index: i,
+                current_file: file_name.clone(),
+                current_index: i + 1,
                 total_files,
                 percent,
                 bytes_copied: copied_bytes,
                 total_bytes,
-                status: format!("Transferring item {} of {}", i, total_files),
-                completed: i == total_files,
+                status: format!("Transferring item {} of {}", i + 1, total_files),
+                completed: i + 1 == total_files,
                 error: None,
             },
         );
+    }
+
+    if notify_enabled {
+        let _ = app
+            .notification()
+            .builder()
+            .title("SnapHarbor: Sync Complete")
+            .body(format!("Backed up {} items from {}.", total_files, device_name))
+            .show();
     }
 
     Ok(total_files)
@@ -304,16 +400,86 @@ pub fn run() {
             let state = app.state::<AppState>();
             *state.db_conn.lock().unwrap() = Some(conn);
 
+            // Setup System Tray Menu
+            let show_item = MenuItem::with_id(app, "show", "Show SnapHarbor", true, None::<&str>)?;
+            let sync_item = MenuItem::with_id(app, "start_sync", "Start 1-Click Sync", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit SnapHarbor", true, None::<&str>)?;
+
+            let tray_menu = Menu::with_items(
+                app,
+                &[&show_item, &sync_item, &quit_item],
+            )?;
+
+            let _tray = TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .tooltip("SnapHarbor AutoSync")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "start_sync" => {
+                        let _ = app.emit("tray://trigger-sync", ());
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app);
+
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                let should_minimize = {
+                    if let Ok(lock) = state.db_conn.lock() {
+                        if let Some(conn) = lock.as_ref() {
+                            db::get_setting(conn, "minimize_to_tray", "true") == "true"
+                        } else {
+                            true
+                        }
+                    } else {
+                        true
+                    }
+                };
+
+                if should_minimize {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_devices,
             get_app_settings,
             update_app_setting,
             get_storage_stats,
             get_recent_media,
+            get_vault_gallery,
+            toggle_media_favorite,
             scan_device_media,
+            clear_sync_history,
+            send_desktop_notification,
             start_sync
         ])
         .run(tauri::generate_context!())

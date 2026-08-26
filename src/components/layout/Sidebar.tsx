@@ -1,8 +1,8 @@
 import React from "react";
-import { Home, Cloud, HardDrive, Settings, Smartphone } from "lucide-react";
+import { Home, Cloud, HardDrive, Settings, Smartphone, Images } from "lucide-react";
 import { useSync } from "../../context/SyncContext";
 
-export type NavTab = "home" | "storage" | "settings";
+export type NavTab = "home" | "gallery" | "storage" | "settings";
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
         <div className="flex flex-col gap-4 mt-2 text-content-secondary">
           <button
             onClick={() => onSelectTab("home")}
-            title="Dashboard (Home)"
+            title="Dashboard (Device Sync)"
             className={`p-3 rounded-2xl transition-all duration-300 cursor-pointer ${
               activeTab === "home"
                 ? "text-content-primary bg-glass shadow-glass border border-white/10"
@@ -37,6 +37,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
             }`}
           >
             <Home size={22} />
+          </button>
+
+          <button
+            onClick={() => onSelectTab("gallery")}
+            title="Vault Photo Gallery"
+            className={`p-3 rounded-2xl transition-all duration-300 cursor-pointer ${
+              activeTab === "gallery"
+                ? "text-content-primary bg-glass shadow-glass border border-white/10"
+                : "hover:text-content-primary hover:bg-glass-light"
+            }`}
+          >
+            <Images size={22} />
           </button>
 
           <button
