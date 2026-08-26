@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-base: #0A0A0E;
+  
+  --color-glass-light: rgba(255, 255, 255, 0.08);
+  --color-glass: rgba(255, 255, 255, 0.05);
+  --color-glass-dark: rgba(0, 0, 0, 0.4);
+  
+  --color-content-primary: #F8F9FA;
+  --color-content-secondary: #A1A1AA;
+  --color-content-accent: #3B82F6;
+  
+  --blur-glass-sm: 8px;
+  --blur-glass: 16px;
+  --blur-glass-md: 24px;
+  --blur-glass-lg: 40px;
+  
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --shadow-glass-inset: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  
+  --radius-glass: 24px;
+  --radius-glass-sm: 16px;
+}
+
+@layer base {
+  body {
+    @apply bg-base text-content-primary overflow-hidden font-sans;
+  }
+}
