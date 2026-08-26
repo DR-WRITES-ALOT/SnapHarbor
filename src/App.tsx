@@ -4,11 +4,13 @@ import { Sidebar, NavTab } from "./components/layout/Sidebar";
 import { Dashboard } from "./components/layout/Dashboard";
 import { StorageView } from "./components/layout/StorageView";
 import { SettingsView } from "./components/layout/SettingsView";
-import { SyncProvider } from "./context/SyncContext";
+import { ToastNotification } from "./components/ui/ToastNotification";
+import { SyncProvider, useSync } from "./context/SyncContext";
 import "./App.css";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<NavTab>("home");
+  const { toasts, dismissToast } = useSync();
 
   return (
     <main className="w-screen h-full min-h-screen overflow-hidden relative flex bg-base text-content-primary font-sans selection:bg-content-accent/30">
@@ -72,6 +74,9 @@ function AppContent() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Toast Alert Popups */}
+      <ToastNotification toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }

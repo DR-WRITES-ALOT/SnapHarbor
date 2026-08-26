@@ -36,6 +36,7 @@ export interface SyncProgressEvent {
   status: string;
   completed: boolean;
   error?: string;
+  synced_files?: string[];
 }
 
 export interface SyncedMediaItem {
@@ -65,4 +66,13 @@ export interface AppSettings {
   delete_after_sync: string;
   skip_duplicates: string;
   include_videos: string;
+  enable_notifications: string;
+  minimize_to_tray: string;
+}
+
+export interface ToastMessage {
+  id: string;
+  type: "success" | "info" | "warning" | "error";
+  title: string;
+  description: string;
 }

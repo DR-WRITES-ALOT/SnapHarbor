@@ -6,6 +6,8 @@ import type {
   SyncedMediaItem,
   ScanSummary,
   SyncProgressEvent,
+  ToastMessage,
+  DiscoveredMediaFile,
 } from "../types";
 import { tauriApi } from "../services/tauriApi";
 
@@ -21,9 +23,16 @@ interface SyncContextType {
   isScanning: boolean;
   isSyncing: boolean;
   syncProgress: SyncProgressEvent | null;
-  startSync: () => Promise<void>;
+  processedFileNames: Set<string>;
+  startSync: (selectedFiles?: DiscoveredMediaFile[]) => Promise<void>;
   refreshDevices: () => Promise<void>;
   refreshStorageStats: () => Promise<void>;
+  clearHistory: () => Promise<void>;
+  openDestinationFolder: () => Promise<void>;
+  addSimulatedDevice: (device: DeviceInfo) => void;
+  toasts: ToastMessage[];
+  addToast: (title: string, description: string, type?: ToastMessage["type"]) => void;
+  dismissToast: (id: string) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -34,6 +43,8 @@ const defaultSettings: AppSettings = {
   delete_after_sync: "false",
   skip_duplicates: "true",
   include_videos: "true",
+  enable_notifications: "true",
+  minimize_to_tray: "true",
 };
 
 const SyncContext = createContext<SyncContextType | undefined>(undefined);
@@ -48,8 +59,25 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgressEvent | null>(null);
+  const [processedFileNames, setProcessedFileNames] = useState<Set<string>>(new Set());
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Load initial settings and devices
+  const addToast = useCallback(
+    (title: string, description: string, type: ToastMessage["type"] = "info") => {
+      const id = `${Date.now()}_${Math.random()}`;
+      setToasts((prev) => [...prev, { id, title, description, type }]);
+
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 5000);
+    },
+    []
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   const refreshDevices = useCallback(async () => {
     try {
       const devList = await tauriApi.getDevices();
@@ -78,6 +106,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const summary = await tauriApi.scanDeviceMedia(device.id, device.mount_path);
       setScanSummary(summary);
+      setProcessedFileNames(new Set());
     } catch (e) {
       console.error("Failed to scan device media:", e);
     } finally {
@@ -105,54 +134,147 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSettings((prev) => ({ ...prev, [key]: value }));
     try {
       await tauriApi.updateAppSetting(key, value);
+      addToast("Settings Updated", `${key.replace(/_/g, " ")} saved.`, "success");
     } catch (e) {
       console.error(`Failed to update setting [${key}]:`, e);
+      addToast("Error Saving Setting", String(e), "error");
     }
   };
 
-  const startSync = async () => {
-    if (isSyncing || !selectedDevice) return;
+  const startSync = useCallback(
+    async (selectedFiles?: DiscoveredMediaFile[]) => {
+      if (isSyncing || !selectedDevice) return;
 
-    setIsSyncing(true);
-    setSyncProgress({
-      current_file: "Preparing transfer...",
-      current_index: 0,
-      total_files: scanSummary?.unsynced_count || 1,
-      percent: 0,
-      bytes_copied: 0,
-      total_bytes: scanSummary?.unsynced_bytes || 0,
-      status: "Initializing...",
-      completed: false,
-    });
+      const targetList =
+        selectedFiles && selectedFiles.length > 0
+          ? selectedFiles
+          : scanSummary?.files || [];
 
-    let cleanupListener: (() => void) | undefined;
+      if (targetList.length === 0) {
+        addToast("No Media", "No media files available to sync.", "warning");
+        return;
+      }
 
-    try {
-      cleanupListener = await tauriApi.listenSyncProgress((progress) => {
-        setSyncProgress(progress);
-        if (progress.completed) {
-          setIsSyncing(false);
-          refreshStorageStats();
-          if (selectedDevice) {
-            refreshScan(selectedDevice);
-          }
-        }
+      const totalFiles = targetList.length;
+      const totalBytes = targetList.reduce((sum, f) => sum + f.file_size_bytes, 0);
+      const isSelective = !!(selectedFiles && selectedFiles.length > 0);
+
+      setIsSyncing(true);
+      setSyncProgress({
+        current_file: targetList[0]?.name || "Preparing transfer...",
+        current_index: 0,
+        total_files: totalFiles,
+        percent: 0,
+        bytes_copied: 0,
+        total_bytes: totalBytes,
+        status: `Starting ${isSelective ? "selective" : "full"} sync...`,
+        completed: false,
       });
 
-      await tauriApi.startSync(
-        selectedDevice.id,
-        selectedDevice.name,
-        selectedDevice.mount_path
+      addToast(
+        isSelective ? "Selective Sync Started" : "Sync Started",
+        `Transferring ${totalFiles} item${totalFiles === 1 ? "" : "s"} from ${selectedDevice.name}...`,
+        "info"
       );
-    } catch (err) {
-      console.error("Sync error:", err);
-      setIsSyncing(false);
-    } finally {
-      if (cleanupListener) {
-        // Keep active for a moment if needed
+
+      let cleanupListener: (() => void) | undefined;
+
+      try {
+        cleanupListener = await tauriApi.listenSyncProgress((progress) => {
+          setSyncProgress(progress);
+
+          if (progress.current_file) {
+            setProcessedFileNames((prev) => new Set([...prev, progress.current_file]));
+          }
+
+          if (progress.completed) {
+            setIsSyncing(false);
+            refreshStorageStats();
+
+            // Add synced items to processed set
+            if (progress.synced_files) {
+              setProcessedFileNames((prev) => new Set([...prev, ...progress.synced_files!]));
+            }
+
+            if (settings.enable_notifications === "true") {
+              tauriApi.sendDesktopNotification(
+                "SnapHarbor Sync Complete",
+                `Backed up ${progress.total_files} items from ${selectedDevice.name} to vault.`
+              );
+            }
+
+            addToast(
+              "Sync Complete!",
+              `Successfully backed up ${progress.total_files} items to your repository.`,
+              "success"
+            );
+          }
+        }, targetList);
+
+        await tauriApi.startSync(
+          selectedDevice.id,
+          selectedDevice.name,
+          selectedDevice.mount_path,
+          targetList.map((f) => f.name)
+        );
+      } catch (err) {
+        console.error("Sync error:", err);
+        setIsSyncing(false);
+        addToast("Sync Error", String(err), "error");
+      } finally {
+        if (cleanupListener) {
+          // cleanup
+        }
       }
+    },
+    [isSyncing, selectedDevice, scanSummary, settings.enable_notifications, refreshStorageStats, addToast]
+  );
+
+  const clearHistory = async () => {
+    try {
+      await tauriApi.clearSyncHistory();
+      await refreshStorageStats();
+      setProcessedFileNames(new Set());
+      addToast("Database Reset", "All past synchronization records cleared.", "info");
+    } catch (e) {
+      console.error("Failed to clear history:", e);
+      addToast("Error", "Could not clear database history.", "error");
     }
   };
+
+  const openDestinationFolder = async () => {
+    try {
+      await tauriApi.openPath(settings.destination_folder);
+      addToast("Vault Opened", `Opening ${settings.destination_folder}`, "info");
+    } catch (e) {
+      console.error("Failed to open path:", e);
+    }
+  };
+
+  const addSimulatedDevice = (device: DeviceInfo) => {
+    setDevices((prev) => {
+      const exists = prev.some((d) => d.id === device.id);
+      if (exists) return prev;
+      return [device, ...prev];
+    });
+    setSelectedDevice(device);
+    setProcessedFileNames(new Set());
+    addToast("Device Connected", `Mounted: ${device.name}`, "success");
+  };
+
+  // Listen to system tray sync trigger
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    tauriApi.listenTraySyncTrigger(() => {
+      startSync();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [startSync]);
 
   return (
     <SyncContext.Provider
@@ -168,9 +290,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isScanning,
         isSyncing,
         syncProgress,
+        processedFileNames,
         startSync,
         refreshDevices,
         refreshStorageStats,
+        clearHistory,
+        openDestinationFolder,
+        addSimulatedDevice,
+        toasts,
+        addToast,
+        dismissToast,
       }}
     >
       {children}

@@ -110,6 +110,8 @@ fn seed_default_settings(conn: &Connection) -> Result<()> {
         ("delete_after_sync", "false"),
         ("skip_duplicates", "true"),
         ("include_videos", "true"),
+        ("enable_notifications", "true"),
+        ("minimize_to_tray", "true"),
     ];
 
     for (key, val) in defaults {
@@ -261,3 +263,9 @@ pub fn get_storage_stats(conn: &Connection) -> Result<StorageStats> {
         last_sync_timestamp: last_sync,
     })
 }
+
+pub fn clear_all_sync_history(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM synced_media", ())?;
+    Ok(())
+}
+
