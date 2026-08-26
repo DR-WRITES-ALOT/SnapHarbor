@@ -31,6 +31,7 @@ interface SyncContextType {
   refreshStorageStats: () => Promise<void>;
   refreshGallery: (deviceId?: string, favoritesOnly?: boolean) => Promise<void>;
   toggleFavorite: (mediaId: number) => Promise<void>;
+  unsyncMedia: (deviceId: string, remotePath: string, fileName: string) => Promise<void>;
   clearHistory: () => Promise<void>;
   openDestinationFolder: () => Promise<void>;
   addSimulatedDevice: (device: DeviceInfo) => void;
@@ -192,13 +193,18 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (selectedFiles?: DiscoveredMediaFile[]) => {
       if (isSyncing || !selectedDevice) return;
 
-      const targetList =
+      const targetList = (
         selectedFiles && selectedFiles.length > 0
           ? selectedFiles
-          : scanSummary?.files || [];
+          : scanSummary?.files || []
+      ).filter((f) => !f.is_synced && !processedFileNames.has(f.name));
 
       if (targetList.length === 0) {
-        addToast("No Media", "No media files available to sync.", "warning");
+        addToast(
+          "Already Backed Up",
+          "The selected items are already safely backed up in your vault.",
+          "info"
+        );
         return;
       }
 
@@ -253,6 +259,9 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsSyncing(false);
             refreshStorageStats();
             refreshGallery();
+            if (selectedDevice) {
+              refreshScan(selectedDevice);
+            }
 
             // Sound chime on completion
             if (settings.sound_alerts_enabled === "true") {
@@ -361,6 +370,35 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(intervalId);
   }, [settings.auto_sync_interval_mins, selectedDevice, isSyncing, scanSummary, startSync, addToast]);
 
+  const unsyncMedia = useCallback(
+    async (deviceId: string, remotePath: string, fileName: string) => {
+      try {
+        await tauriApi.unsyncMediaItem(deviceId, remotePath);
+        setProcessedFileNames((prev) => {
+          const next = new Set(prev);
+          next.delete(fileName);
+          return next;
+        });
+
+        if (selectedDevice) {
+          await refreshScan(selectedDevice);
+        }
+        await refreshStorageStats();
+        await refreshGallery();
+
+        addToast(
+          "Media Unsynced",
+          `"${fileName}" has been marked as unsynced and can be backed up again.`,
+          "info"
+        );
+      } catch (e) {
+        console.error("Failed to unsync media:", e);
+        addToast("Error", "Could not unsync media item.", "error");
+      }
+    },
+    [selectedDevice, refreshScan, refreshStorageStats, refreshGallery, addToast]
+  );
+
   const clearHistory = async () => {
     try {
       await tauriApi.clearSyncHistory();
@@ -429,6 +467,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshStorageStats,
         refreshGallery,
         toggleFavorite,
+        unsyncMedia,
         clearHistory,
         openDestinationFolder,
         addSimulatedDevice,

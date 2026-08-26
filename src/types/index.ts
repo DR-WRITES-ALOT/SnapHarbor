@@ -16,6 +16,7 @@ export interface DiscoveredMediaFile {
   file_size_bytes: number;
   created_at?: string;
   is_video: boolean;
+  is_synced?: boolean;
 }
 
 export interface ScanSummary {

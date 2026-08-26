@@ -363,17 +363,17 @@ export const GalleryView: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Video badge */}
+                        {/* Video badge (Bottom-Left to avoid overlap with Star button) */}
                         {isVideo && (
-                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] text-white flex items-center gap-1 font-medium pointer-events-none">
+                          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[10px] text-white flex items-center gap-1 font-medium pointer-events-none shadow-md z-10">
                             <Video size={10} /> Video
                           </div>
                         )}
 
-                        {/* Favorite star badge */}
+                        {/* Persistent Favorite Star badge (Top-Left when not hovered) */}
                         {item.is_favorite && (
-                          <div className="absolute bottom-2 right-2 p-1 rounded-full bg-amber-500/90 text-white shadow-md pointer-events-none">
-                            <Star size={10} className="fill-white" />
+                          <div className="absolute top-2 left-2 p-1.5 rounded-full bg-amber-500 text-white shadow-lg pointer-events-none z-10 group-hover:opacity-0 transition-opacity">
+                            <Star size={11} className="fill-white" />
                           </div>
                         )}
                       </div>

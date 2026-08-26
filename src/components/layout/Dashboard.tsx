@@ -4,6 +4,7 @@ import {
   CloudUpload,
   Search,
   Check,
+  CheckCircle2,
   Loader2,
   Smartphone,
   BatteryMedium,
@@ -18,6 +19,8 @@ import {
   Square,
   Eye,
   Camera,
+  Filter,
+  RotateCcw,
 } from "lucide-react";
 import { GlassCard } from "../ui/GlassCard";
 import { MediaPreviewModal } from "../ui/MediaPreviewModal";
@@ -85,10 +88,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     startSync,
     refreshDevices,
     addSimulatedDevice,
+    addToast,
+    unsyncMedia,
   } = useSync();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [mediaFilter, setMediaFilter] = useState<"all" | "photos" | "videos">("all");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "unsynced" | "photos" | "videos">("all");
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -105,16 +110,42 @@ export const Dashboard: React.FC<DashboardProps> = () => {
   const filteredMedia = useMemo(() => {
     if (!scanSummary?.files) return [];
     return scanSummary.files.filter((item) => {
+      const isSynced = item.is_synced || processedFileNames.has(item.name);
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesFilter =
-        mediaFilter === "all" ||
-        (mediaFilter === "photos" && !item.is_video) ||
-        (mediaFilter === "videos" && item.is_video);
+
+      let matchesFilter = true;
+      if (mediaFilter === "unsynced") matchesFilter = !isSynced;
+      if (mediaFilter === "photos") matchesFilter = !item.is_video;
+      if (mediaFilter === "videos") matchesFilter = item.is_video;
+
       return matchesSearch && matchesFilter;
     });
-  }, [scanSummary, searchQuery, mediaFilter]);
+  }, [scanSummary, searchQuery, mediaFilter, processedFileNames]);
+
+  // Indices of unsynced items within filteredMedia
+  const unsyncedIndices = useMemo(() => {
+    return filteredMedia
+      .map((item, idx) => (!item.is_synced && !processedFileNames.has(item.name) ? idx : -1))
+      .filter((idx) => idx !== -1);
+  }, [filteredMedia, processedFileNames]);
+
+  const allUnsyncedSelected =
+    unsyncedIndices.length > 0 && unsyncedIndices.every((idx) => selectedIndices.has(idx));
 
   const toggleSelectIndex = (idx: number) => {
+    const item = filteredMedia[idx];
+    if (!item) return;
+
+    const isSynced = item.is_synced || processedFileNames.has(item.name);
+    if (isSynced) {
+      addToast(
+        "Already Backed Up",
+        `"${item.name}" is already safely stored in your vault.`,
+        "info"
+      );
+      return;
+    }
+
     setSelectedIndices((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) {
@@ -127,10 +158,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIndices.size === filteredMedia.length) {
+    if (allUnsyncedSelected) {
       setSelectedIndices(new Set());
     } else {
-      setSelectedIndices(new Set(filteredMedia.map((_, i) => i)));
+      setSelectedIndices(new Set(unsyncedIndices));
     }
   };
 
@@ -138,7 +169,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     if (selectedIndices.size > 0) {
       const selectedFiles = Array.from(selectedIndices)
         .map((idx) => filteredMedia[idx])
-        .filter(Boolean);
+        .filter((f) => f && !f.is_synced && !processedFileNames.has(f.name));
+
+      if (selectedFiles.length === 0) {
+        addToast(
+          "Already Backed Up",
+          "All selected items are already backed up in your vault.",
+          "info"
+        );
+        setSelectedIndices(new Set());
+        return;
+      }
+
       startSync(selectedFiles);
       setSelectedIndices(new Set());
     } else {
@@ -159,7 +201,8 @@ export const Dashboard: React.FC<DashboardProps> = () => {
   }, [isSyncing, selectedDevice, selectedIndices, filteredMedia]);
 
   const currentPercent = syncProgress?.percent ?? 0;
-  const allSelected = filteredMedia.length > 0 && selectedIndices.size === filteredMedia.length;
+  const unsyncedCount = scanSummary?.unsynced_count ?? 0;
+  const isAllSynced = Boolean(!isScanning && scanSummary && unsyncedCount === 0);
 
   return (
     <div className="w-full h-full overflow-y-auto min-h-0 flex-1 p-6 sm:p-10 relative z-10 flex flex-col gap-8 select-none overscroll-contain pb-20">
@@ -172,22 +215,33 @@ export const Dashboard: React.FC<DashboardProps> = () => {
           <p className="text-sm text-content-secondary mt-1">
             {isScanning
               ? "Scanning connected storage for media..."
-              : `${scanSummary?.unsynced_count || 0} unsynced items ready for transfer`}
+              : isAllSynced
+              ? "All photos and videos from this device are backed up in your vault."
+              : `${unsyncedCount} new unsynced item${unsyncedCount === 1 ? "" : "s"} ready for backup`}
           </p>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Select All / Deselect Toggle */}
+          {/* Select All / Deselect Toggle for Unsynced Items */}
           <button
             onClick={toggleSelectAll}
+            disabled={unsyncedIndices.length === 0}
             className={`px-3 py-2 rounded-xl border text-xs font-medium flex items-center gap-2 transition-all cursor-pointer ${
-              allSelected
+              allUnsyncedSelected
                 ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
+                : unsyncedIndices.length === 0
+                ? "opacity-50 cursor-not-allowed bg-white/[0.02] border-white/5 text-content-secondary"
                 : "bg-white/[0.04] border-white/10 text-content-secondary hover:text-content-primary hover:bg-white/[0.08]"
             }`}
           >
-            {allSelected ? <CheckSquare size={14} /> : <Square size={14} />}
-            <span>{allSelected ? "Deselect All" : "Select All"}</span>
+            {allUnsyncedSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+            <span>
+              {unsyncedIndices.length === 0
+                ? "All Backed Up"
+                : allUnsyncedSelected
+                ? "Deselect Unsynced"
+                : `Select All Unsynced (${unsyncedIndices.length})`}
+            </span>
           </button>
 
           {/* Media Type Filter buttons */}
@@ -201,6 +255,16 @@ export const Dashboard: React.FC<DashboardProps> = () => {
               }`}
             >
               All
+            </button>
+            <button
+              onClick={() => setMediaFilter("unsynced")}
+              className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                mediaFilter === "unsynced"
+                  ? "bg-content-accent text-white font-medium shadow-sm"
+                  : "text-content-secondary hover:text-content-primary"
+              }`}
+            >
+              <Filter size={12} /> Unsynced ({unsyncedCount})
             </button>
             <button
               onClick={() => setMediaFilter("photos")}
@@ -363,14 +427,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         <div className="flex items-center gap-4 flex-wrap">
           <button
             onClick={handleSyncClick}
-            disabled={isSyncing || !selectedDevice}
+            disabled={Boolean(isSyncing || !selectedDevice || (isAllSynced && selectedIndices.size === 0))}
             title="Shortcut: Ctrl+Enter"
-            className={`bg-content-accent/20 hover:bg-content-accent/30 border border-content-accent/30 text-content-primary px-8 py-3.5 rounded-full flex items-center gap-3 font-medium transition-all shadow-[0_0_25px_rgba(59,130,246,0.25)] cursor-pointer ${
-              isSyncing || !selectedDevice ? "opacity-70 cursor-not-allowed" : ""
-            }`}
+            className={`px-8 py-3.5 rounded-full flex items-center gap-3 font-medium transition-all shadow-[0_0_25px_rgba(59,130,246,0.25)] cursor-pointer ${
+              isAllSynced && selectedIndices.size === 0
+                ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-default shadow-[0_0_20px_rgba(16,185,129,0.2)]"
+                : "bg-content-accent/20 hover:bg-content-accent/30 border border-content-accent/30 text-content-primary"
+            } ${isSyncing || !selectedDevice ? "opacity-70 cursor-not-allowed" : ""}`}
           >
             {isSyncing ? (
               <Loader2 size={20} className="text-blue-400 animate-spin" />
+            ) : isAllSynced && selectedIndices.size === 0 ? (
+              <CheckCircle2 size={20} className="text-emerald-400" />
             ) : (
               <CloudUpload size={20} className="text-blue-400" />
             )}
@@ -379,7 +447,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 ? "Syncing Media..."
                 : selectedIndices.size > 0
                 ? `Sync Selected (${selectedIndices.size} Items)`
-                : "Start 1-Click Sync"}
+                : isAllSynced
+                ? "All Media Backed Up"
+                : `Start 1-Click Sync (${unsyncedCount} New)`}
             </span>
           </button>
 
@@ -425,7 +495,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             </span>
           </h2>
           <span className="text-xs text-content-secondary">
-            Total: {formatBytes(scanSummary?.total_bytes || 0)}
+            {unsyncedCount} unsynced • Total: {formatBytes(scanSummary?.total_bytes || 0)}
           </span>
         </div>
 
@@ -436,6 +506,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 <Loader2 size={28} className="animate-spin text-content-accent" />
                 <span>Scanning connected device for photos and videos...</span>
               </div>
+            ) : mediaFilter === "unsynced" ? (
+              <div className="flex flex-col items-center gap-2">
+                <CheckCircle2 size={32} className="text-emerald-400" />
+                <span className="text-content-primary font-medium">All Media Synchronized</span>
+                <span className="text-xs">No unsynced files remain on this device.</span>
+              </div>
             ) : (
               <span>No media matches the current filter or search criteria.</span>
             )}
@@ -444,18 +520,26 @@ export const Dashboard: React.FC<DashboardProps> = () => {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {filteredMedia.map((item, idx) => {
               const isSelected = selectedIndices.has(idx);
-              const isItemProcessed = processedFileNames.has(item.name);
+              const isItemSynced = item.is_synced || processedFileNames.has(item.name);
               const isCurrent = isSyncing && syncProgress?.current_file === item.name;
 
               return (
                 <GlassCard
                   key={item.name}
-                  onClick={() => toggleSelectIndex(idx)}
+                  onClick={() => {
+                    if (isItemSynced) {
+                      setPreviewIndex(idx);
+                    } else {
+                      toggleSelectIndex(idx);
+                    }
+                  }}
                   className={`p-3 flex flex-col gap-2.5 group relative cursor-pointer hover:-translate-y-1 transition-all duration-300 ${
                     isSelected
                       ? "ring-2 ring-emerald-500 bg-emerald-500/[0.06] shadow-[0_0_20px_rgba(16,185,129,0.25)]"
                       : isCurrent
                       ? "ring-2 ring-content-accent shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                      : isItemSynced
+                      ? "opacity-85 border-white/5"
                       : ""
                   }`}
                 >
@@ -468,30 +552,46 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                       loading="lazy"
                     />
 
-                    {/* Preview Button on Hover */}
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPreviewIndex(idx);
-                      }}
-                      title="Inspect Photo & Metadata"
-                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity backdrop-blur-[1px] cursor-pointer"
-                    >
-                      <div className="px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-xs font-medium flex items-center gap-1.5 shadow-lg">
+                    {/* Hover Overlay with Preview */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity backdrop-blur-[1px] cursor-pointer z-10">
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewIndex(idx);
+                        }}
+                        className="px-3.5 py-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md text-xs font-medium text-white flex items-center gap-1.5 shadow-lg cursor-pointer"
+                      >
                         <Eye size={13} /> Preview
                       </div>
                     </div>
 
+                    {/* Video badge */}
                     {item.is_video && (
-                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] text-white flex items-center gap-1 font-medium pointer-events-none">
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-md text-[10px] text-white flex items-center gap-1 font-medium pointer-events-none shadow-md z-20">
                         <Video size={10} /> Video
                       </div>
                     )}
 
-                    {isItemProcessed && (
-                      <div className="absolute inset-0 bg-emerald-950/60 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-                        <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg animate-in zoom-in-50">
-                          <Check size={18} />
+                    {/* Synced status badge & Hover Unsync Trigger */}
+                    {isItemSynced && (
+                      <div className="absolute top-2 right-2 z-20">
+                        {/* Hover Unsync Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedDevice) {
+                              unsyncMedia(selectedDevice.id, item.source_path, item.name);
+                            }
+                          }}
+                          title="Unsync (Remove from backup records so it can be re-synced)"
+                          className="opacity-0 group-hover:opacity-100 transition-all px-2.5 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-semibold flex items-center gap-1 shadow-xl cursor-pointer"
+                        >
+                          <RotateCcw size={11} /> Unsync
+                        </button>
+
+                        {/* Unhovered Synced Pill */}
+                        <div className="group-hover:opacity-0 transition-opacity px-2 py-0.5 rounded-full bg-emerald-500/90 text-white text-[10px] font-medium flex items-center gap-1 shadow-md pointer-events-none absolute top-0 right-0 whitespace-nowrap">
+                          <Check size={11} /> Synced
                         </div>
                       </div>
                     )}
@@ -503,20 +603,36 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                       <span>{formatBytes(item.file_size_bytes)}</span>
                     </div>
 
-                    {/* Selection Checkbox */}
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleSelectIndex(idx);
-                      }}
-                      className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
-                        isSelected
-                          ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
-                          : "border-white/30 text-transparent group-hover:border-white/60"
-                      }`}
-                    >
-                      <Check size={12} />
-                    </div>
+                    {/* Selection Checkbox or Secured Badge with Quick Click-to-Unsync */}
+                    {isItemSynced ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedDevice) {
+                            unsyncMedia(selectedDevice.id, item.source_path, item.name);
+                          }
+                        }}
+                        title="Already Backed Up (Click to Unsync)"
+                        className="w-5 h-5 rounded-md bg-emerald-500/20 hover:bg-rose-500/20 text-emerald-400 hover:text-rose-400 border border-emerald-500/30 hover:border-rose-500/40 flex items-center justify-center transition-all cursor-pointer shrink-0 group/unsync"
+                      >
+                        <Check size={12} className="group-hover/unsync:hidden" />
+                        <RotateCcw size={11} className="hidden group-hover/unsync:block text-rose-400" />
+                      </button>
+                    ) : (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectIndex(idx);
+                        }}
+                        className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                          isSelected
+                            ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                            : "border-white/30 text-transparent group-hover:border-white/60"
+                        }`}
+                      >
+                        <Check size={12} />
+                      </div>
+                    )}
                   </div>
                 </GlassCard>
               );
@@ -536,6 +652,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             onSelectIndex={setPreviewIndex}
             isSelected={selectedIndices.has(previewIndex)}
             onToggleSelect={toggleSelectIndex}
+            onUnsync={(item) => {
+              if (selectedDevice) {
+                unsyncMedia(selectedDevice.id, item.source_path, item.name);
+              }
+            }}
           />
         )}
       </AnimatePresence>

@@ -192,6 +192,22 @@ pub fn is_file_synced(conn: &Connection, file_hash: &str) -> bool {
     stmt.exists(params![file_hash]).unwrap_or(false)
 }
 
+pub fn is_remote_path_or_hash_synced(conn: &Connection, device_id: &str, remote_path: &str) -> bool {
+    let mut stmt = match conn.prepare("SELECT 1 FROM synced_media WHERE device_id = ?1 AND remote_path = ?2 LIMIT 1") {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    stmt.exists(params![device_id, remote_path]).unwrap_or(false)
+}
+
+pub fn unsync_media_by_remote_path(conn: &Connection, device_id: &str, remote_path: &str) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM synced_media WHERE device_id = ?1 AND remote_path = ?2",
+        params![device_id, remote_path],
+    )
+}
+
 pub fn record_synced_file(conn: &Connection, item: &NewSyncedMedia) -> Result<i64> {
     conn.execute(
         "INSERT INTO synced_media (

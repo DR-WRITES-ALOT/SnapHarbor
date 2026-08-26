@@ -119,6 +119,19 @@ fn toggle_media_favorite(
 }
 
 #[tauri::command]
+fn unsync_media_item(
+    state: State<'_, AppState>,
+    device_id: String,
+    remote_path: String,
+) -> Result<bool, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::unsync_media_by_remote_path(conn, &device_id, &remote_path).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
 fn clear_sync_history(state: State<'_, AppState>) -> Result<bool, String> {
     let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
     let conn = lock.as_ref().ok_or("Database not initialized")?;
@@ -150,24 +163,34 @@ fn scan_device_media(
         for i in 1..=24 {
             let is_video = i % 5 == 0;
             let size = if is_video { 45_000_000 + i * 2_500_000 } else { 3_500_000 + i * 400_000 };
+            let source_path = format!("/storage/emulated/0/DCIM/Camera/IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" });
+            let is_synced = db::is_remote_path_or_hash_synced(conn, &device_id, &source_path);
+
             discovered.push(DiscoveredMediaFile {
                 name: format!("IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" }),
-                source_path: format!("/storage/emulated/0/DCIM/Camera/IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" }),
+                source_path,
                 file_size_bytes: size as u64,
                 created_at: Some(chrono::Utc::now().to_rfc3339()),
                 is_video,
+                is_synced,
             });
+        }
+    } else {
+        for file in &mut discovered {
+            file.is_synced = db::is_remote_path_or_hash_synced(conn, &device_id, &file.source_path);
         }
     }
 
     let total_discovered = discovered.len();
     let total_bytes: u64 = discovered.iter().map(|f| f.file_size_bytes).sum();
+    let unsynced_count = discovered.iter().filter(|f| !f.is_synced).count();
+    let unsynced_bytes: u64 = discovered.iter().filter(|f| !f.is_synced).map(|f| f.file_size_bytes).sum();
 
     Ok(ScanSummary {
         total_discovered,
         total_bytes,
-        unsynced_count: total_discovered,
-        unsynced_bytes: total_bytes,
+        unsynced_count,
+        unsynced_bytes,
         files: discovered,
     })
 }
@@ -482,6 +505,7 @@ pub fn run() {
             toggle_media_favorite,
             scan_device_media,
             clear_sync_history,
+            unsync_media_item,
             send_desktop_notification,
             start_sync
         ])

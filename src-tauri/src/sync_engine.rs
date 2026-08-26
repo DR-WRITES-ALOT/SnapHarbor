@@ -14,6 +14,7 @@ pub struct DiscoveredMediaFile {
     pub file_size_bytes: u64,
     pub created_at: Option<String>,
     pub is_video: bool,
+    pub is_synced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +104,7 @@ pub fn scan_directory_media(source_dir: &Path, include_videos: bool) -> Vec<Disc
                         file_size_bytes,
                         created_at,
                         is_video,
+                        is_synced: false,
                     });
                 }
             }
