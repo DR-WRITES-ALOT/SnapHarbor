@@ -162,7 +162,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
   const allSelected = filteredMedia.length > 0 && selectedIndices.size === filteredMedia.length;
 
   return (
-    <div className="w-full h-full overflow-y-auto min-h-0 flex-1 p-6 sm:p-10 relative z-10 flex flex-col gap-8 select-none">
+    <div className="w-full h-full overflow-y-auto min-h-0 flex-1 p-6 sm:p-10 relative z-10 flex flex-col gap-8 select-none overscroll-contain pb-20">
       {/* Header section */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>

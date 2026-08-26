@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type {
   DeviceInfo,
   AppSettings,
@@ -10,6 +10,7 @@ import type {
   DiscoveredMediaFile,
 } from "../types";
 import { tauriApi } from "../services/tauriApi";
+import { soundEffects } from "../services/soundEffects";
 
 interface SyncContextType {
   devices: DeviceInfo[];
@@ -43,6 +44,9 @@ const defaultSettings: AppSettings = {
   organize_by_date: "true",
   date_format: "YYYY/MM",
   auto_sync_on_connect: "false",
+  auto_sync_interval_mins: "0",
+  min_battery_threshold: "20",
+  sound_alerts_enabled: "true",
   delete_after_sync: "false",
   skip_duplicates: "true",
   include_videos: "true",
@@ -66,16 +70,22 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [processedFileNames, setProcessedFileNames] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  const prevDeviceIdRef = useRef<string | null>(null);
+
   const addToast = useCallback(
     (title: string, description: string, type: ToastMessage["type"] = "info") => {
       const id = `${Date.now()}_${Math.random()}`;
       setToasts((prev) => [...prev, { id, title, description, type }]);
 
+      if (settings.sound_alerts_enabled === "true" && type === "warning") {
+        soundEffects.playWarning();
+      }
+
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
       }, 5000);
     },
-    []
+    [settings.sound_alerts_enabled]
   );
 
   const dismissToast = useCallback((id: string) => {
@@ -153,7 +163,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     tauriApi.getAppSettings().then((s) => {
       if (s && Object.keys(s).length > 0) {
-        setSettings(s);
+        setSettings((prev) => ({ ...prev, ...s }));
       }
     });
     refreshDevices();
@@ -189,6 +199,21 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (targetList.length === 0) {
         addToast("No Media", "No media files available to sync.", "warning");
+        return;
+      }
+
+      // Battery Guard Check
+      const minBattery = parseInt(settings.min_battery_threshold || "0", 10);
+      if (
+        selectedDevice.battery_level !== undefined &&
+        minBattery > 0 &&
+        selectedDevice.battery_level < minBattery
+      ) {
+        addToast(
+          "Battery Guard Active",
+          `Device battery is ${selectedDevice.battery_level}% (below ${minBattery}% safety threshold). Please charge device before syncing.`,
+          "warning"
+        );
         return;
       }
 
@@ -229,6 +254,11 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             refreshStorageStats();
             refreshGallery();
 
+            // Sound chime on completion
+            if (settings.sound_alerts_enabled === "true") {
+              soundEffects.playSyncComplete();
+            }
+
             // Add synced items to processed set
             if (progress.synced_files) {
               setProcessedFileNames((prev) => new Set([...prev, ...progress.synced_files!]));
@@ -265,8 +295,71 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     },
-    [isSyncing, selectedDevice, scanSummary, settings.enable_notifications, refreshStorageStats, refreshGallery, addToast]
+    [
+      isSyncing,
+      selectedDevice,
+      scanSummary,
+      settings.enable_notifications,
+      settings.sound_alerts_enabled,
+      settings.min_battery_threshold,
+      refreshStorageStats,
+      refreshGallery,
+      addToast,
+    ]
   );
+
+  // Auto-Sync on Device Connect Trigger
+  useEffect(() => {
+    if (!selectedDevice) return;
+
+    const isNewDevice = prevDeviceIdRef.current !== selectedDevice.id;
+    prevDeviceIdRef.current = selectedDevice.id;
+
+    if (isNewDevice && selectedDevice.is_connected) {
+      if (settings.sound_alerts_enabled === "true") {
+        soundEffects.playDeviceConnected();
+      }
+
+      if (settings.auto_sync_on_connect === "true" && !isSyncing) {
+        // Wait 1.5s for scan summary to settle, then start sync
+        const timer = setTimeout(() => {
+          addToast(
+            "Auto-Sync Triggered",
+            `Automatic backup initiated for ${selectedDevice.name}`,
+            "info"
+          );
+          startSync();
+        }, 1500);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedDevice, settings.auto_sync_on_connect, settings.sound_alerts_enabled, isSyncing, startSync, addToast]);
+
+  // Interval Background Sync Scheduler
+  useEffect(() => {
+    const intervalMins = parseInt(settings.auto_sync_interval_mins || "0", 10);
+    if (intervalMins <= 0) return;
+
+    const intervalMs = intervalMins * 60 * 1000;
+    const intervalId = setInterval(() => {
+      if (
+        selectedDevice?.is_connected &&
+        !isSyncing &&
+        scanSummary &&
+        scanSummary.unsynced_count > 0
+      ) {
+        addToast(
+          "Scheduled Sync",
+          `Running periodic backup (${intervalMins}m interval)...`,
+          "info"
+        );
+        startSync();
+      }
+    }, intervalMs);
+
+    return () => clearInterval(intervalId);
+  }, [settings.auto_sync_interval_mins, selectedDevice, isSyncing, scanSummary, startSync, addToast]);
 
   const clearHistory = async () => {
     try {

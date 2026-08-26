@@ -24,7 +24,14 @@
 }
 
 @layer base {
-  body {
-    @apply bg-base text-content-primary overflow-hidden font-sans;
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #0A0A0E;
+    color: #F8F9FA;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 }

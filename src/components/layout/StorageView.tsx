@@ -27,7 +27,7 @@ export const StorageView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 h-full overflow-y-auto p-10 relative z-10 flex flex-col gap-8">
+    <div className="w-full h-full overflow-y-auto min-h-0 flex-1 p-6 sm:p-10 relative z-10 flex flex-col gap-8 select-none overscroll-contain pb-20">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-content-primary">Storage & History</h1>
