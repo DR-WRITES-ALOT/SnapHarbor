@@ -3,9 +3,8 @@ mod sync_engine;
 mod wpd;
 
 use db::{NewSyncedMedia, StorageStats, SyncedMediaItem};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use sync_engine::{
     calculate_file_sha256, copy_media_file_safe, generate_destination_path,
