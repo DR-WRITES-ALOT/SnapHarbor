@@ -39,7 +39,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: SnapHarbor-v__VERSION__
+          tagName: v__VERSION__
           releaseName: 'SnapHarbor v__VERSION__'
           releaseBody: 'See the assets below to download the latest SnapHarbor installer for Windows.'
           releaseDraft: false
