@@ -13,15 +13,27 @@ import {
   Check,
   Grid3X3,
   LayoutGrid,
+  Loader2,
+  ChevronDown,
 } from "lucide-react";
 import { GlassCard } from "../ui/GlassCard";
+import { MediaThumb } from "../ui/MediaThumb";
 import { MediaPreviewModal } from "../ui/MediaPreviewModal";
 import { useSync } from "../../context/SyncContext";
 import type { SyncedMediaItem, DiscoveredMediaFile } from "../../types";
 import { tauriApi } from "../../services/tauriApi";
+import { fileNameOf, isVideoPath } from "../../services/mediaUrl";
 
 export const GalleryView: React.FC = () => {
-  const { galleryMedia, toggleFavorite, openDestinationFolder, addToast } = useSync();
+  const {
+    galleryMedia,
+    toggleFavorite,
+    openDestinationFolder,
+    addToast,
+    hasMoreGallery,
+    loadMoreGallery,
+  } = useSync();
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "photos" | "videos" | "favorites">("all");
@@ -38,13 +50,9 @@ export const GalleryView: React.FC = () => {
     return `${mb.toFixed(1)} MB`;
   };
 
-  const getFileName = (path: string) => {
-    return path.split(/[/\\]/).pop() || path;
-  };
+  const getFileName = (path: string) => fileNameOf(path);
 
-  const isVideoFile = (path: string) => {
-    return /\.(mp4|mov|avi|mkv|webm)$/i.test(path);
-  };
+  const isVideoFile = (path: string) => isVideoPath(path);
 
   // Unique devices in the gallery
   const uniqueDevices = useMemo(() => {
@@ -296,13 +304,22 @@ export const GalleryView: React.FC = () => {
                       className="p-3 flex flex-col gap-2.5 group relative cursor-pointer hover:-translate-y-1 transition-all duration-300"
                     >
                       <div className="relative aspect-square rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
-                        {/* Thumbnail */}
-                        <img
-                          src={`https://picsum.photos/seed/${item.id + 300}/300/300`}
+                        {/* Real thumbnail from the vault, with placeholder fallback */}
+                        <MediaThumb
+                          path={item.local_path}
+                          isVideo={isVideo}
                           alt={fileName}
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          loading="lazy"
                         />
+
+                        {item.file_exists === false && (
+                          <span
+                            title="This file is indexed but is no longer on disk"
+                            className="absolute top-1.5 left-1.5 z-10 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide bg-rose-500/80 text-white shadow"
+                          >
+                            Missing
+                          </span>
+                        )}
 
                         {/* Hover Overlay with Preview & Actions */}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col justify-between p-2.5 transition-opacity backdrop-blur-[1px]">
@@ -394,6 +411,27 @@ export const GalleryView: React.FC = () => {
               </div>
             </div>
           ))}
+
+          {hasMoreGallery && (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={async () => {
+                  setIsLoadingMore(true);
+                  await loadMoreGallery();
+                  setIsLoadingMore(false);
+                }}
+                disabled={isLoadingMore}
+                className="px-6 py-3 rounded-full text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-content-primary transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isLoadingMore ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+                {isLoadingMore ? "Loading..." : "Load More Media"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

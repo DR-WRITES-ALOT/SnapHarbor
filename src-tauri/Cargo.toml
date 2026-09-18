@@ -2,7 +2,7 @@
 name = "snapharbor"
 version = "1.0.0"
 description = "SnapHarbor - Fast USB & SD Media Vault for Windows"
-authors = ["SnapHarbor"]
+authors = ["DR-WRITES-ALOT"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
@@ -27,10 +27,10 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = "0.4"
 sha2 = "0.10"
 walkdir = "2"
-windows = { version = "0.58", features = [
-    "Win32_System_Com",
-    "Win32_Devices_PortableDevices",
-    "Win32_Foundation",
-] }
+
+# NOTE: the `windows` crate used to be listed here for the MTP/Portable Devices
+# APIs, but nothing in this codebase ever called them — device discovery only
+# walks drive letters. It will come back together with a real MTP backend
+# (see the notes at the top of src/wpd.rs).
 
 

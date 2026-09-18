@@ -4,7 +4,7 @@
 
 **A high-performance, local-first photo & video media vault for Windows with smart SHA-256 deduplication, timeline gallery, automation rules, and modern glassmorphism aesthetics.**
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-emerald?logo=github)](https://github.com)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-emerald?logo=github)](https://github.com/DR-WRITES-ALOT/SnapHarbor/releases)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-blue?logo=tauri)](https://tauri.app)
 [![React 19](https://img.shields.io/badge/React-v19-61dafb?logo=react)](https://react.dev)
 [![Rust](https://img.shields.io/badge/Rust-2021-DEA584?logo=rust)](https://www.rust-lang.org/)
@@ -18,10 +18,10 @@
 
 ## ✨ Features
 
-- **⚡ 1-Click Media Synchronization**: Seamlessly detect mobile devices (Android MTP, iOS), cameras, and SD cards / removable drives to back up photos and videos to local storage.
+- **⚡ 1-Click Media Synchronization**: Detects cameras, SD cards, USB readers and phones that mount as a drive letter, then backs up their photos and videos to local storage.
 - **🎯 Selective File Sync & Protection**: Choose individual photos or select in bulk. Backed-up items are protected against accidental duplicate transfers.
 - **🔄 Individual Unsync**: Reset sync records for individual files on the Home Dashboard with a 1-click reset button.
-- **🖼️ Vault Photo & Video Gallery**: Browse your backed-up library organized by monthly timeline headers, filter by Favorites ⭐ / Photos / Videos / Devices, and toggle grid densities.
+- **🖼️ Vault Photo & Video Gallery**: Browse your backed-up library with real thumbnails read straight off disk, organized by monthly timeline headers. Filter by Favorites ⭐ / Photos / Videos / Devices, toggle grid densities, play videos inline, and page through large vaults.
 - **🛡️ Smart SHA-256 Deduplication**: Files are indexed in a local SQLite database (`autosync.db`). Duplicate photos are recognized instantly and never copied twice.
 - **⚙️ Automation & Rules Suite**:
   - **Auto-Sync on Plug-In**: Automatically initiates backup the moment a phone or SD card is inserted.
@@ -29,10 +29,10 @@
   - **Battery Protection Guard**: Automatically pauses auto-sync if device battery is below safety threshold (e.g. `< 20%`).
   - **Harmonic Audio Chimes**: Web Audio API synthesizer for pleasant harmonic completion chimes.
 - **📂 Customizable Vault Hierarchy**: Organize backups automatically into configurable folder formats (`YYYY/MM`, `YYYY-MM-DD`, `Device/YYYY-MM`) with a real-time directory tree preview.
-- **🔍 Full-Screen Inspection Lightbox**: Click any media thumbnail to view high-resolution previews, zoom in/out (50% to 300%), inspect EXIF capture timestamps and file size, and navigate via keyboard shortcuts.
-- **📊 Storage Distribution Breakdown**: Visual analytics bar charting space consumed by Photos vs Videos vs Free Disk Space, along with a searchable sync history log.
+- **🔍 Full-Screen Inspection Lightbox**: Click any media thumbnail for a full-resolution preview (photos) or inline playback (videos), zoom 50–300%, check capture timestamp, size and source path, and navigate with the keyboard.
+- **📊 Storage & Sync History**: Vault totals, deduplication status, configured destination, and a reverse-chronological log of every indexed transfer.
 - **🔔 Windows System Tray & Native Toast Notifications**: Minimizes quietly to the Windows system tray on close (`X`) so background transfers continue uninterrupted. Receives Windows OS toast alerts when sync completes.
-- **🎮 Multi-Device Simulation Switcher**: Built-in hardware switcher to simulate and test various mobile phones, action cameras, and SD card drives in development.
+- **🎮 Demo / Simulation Mode**: An opt-in switcher (Settings → Demo Mode) that adds clearly labelled fake devices so the UI can be explored without hardware. Demo runs are simulated end-to-end — no files are written and nothing is added to the vault index.
 
 ---
 
@@ -51,20 +51,31 @@
 
 ---
 
-## 📈 Feature Checklist (v1.0.0 Complete)
+## 📈 Feature Status
 
-| Component | Status | Progress | Notes |
-| :--- | :---: | :---: | :--- |
-| **UI & Layout Design** | ✅ Complete | 100% | Dark glassmorphism, responsive dashboard, tabs, modals |
-| **Photo Selection & Lightbox** | ✅ Complete | 100% | Multi-select, full-screen zoom, keyboard shortcuts |
-| **Vault Gallery View** | ✅ Complete | 100% | Timeline clustering, favorites manager, density switcher |
-| **Automation & Rules Engine** | ✅ Complete | 100% | Plug-in auto-trigger, interval scheduler, battery guard |
-| **SQLite Deduplication Engine** | ✅ Complete | 100% | SHA-256 hash checking, `autosync.db` CRUD, unsync action |
-| **Audio Synthesizer** | ✅ Complete | 100% | Web Audio harmonic major triad feedback chimes |
-| **Background Sync & Streaming** | ✅ Complete | 100% | Real-time progress broadcasting, selective copying |
-| **System Tray & OS Alerts** | ✅ Complete | 100% | Tray context menu, minimize-to-tray, toast alerts |
-| **Vault Hierarchy Visualizer** | ✅ Complete | 100% | Dynamic ASCII folder tree preview |
-| **Native Packaging & CI/CD** | ✅ Complete | 100% | Automated GitHub Actions `.exe` & `.msi` release workflow |
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **UI & Layout Design** | ✅ Working | Dark glassmorphism, responsive dashboard, tabs, modals |
+| **Photo Selection & Lightbox** | ✅ Working | Multi-select, real full-resolution previews, video playback, keyboard shortcuts |
+| **Vault Gallery View** | ✅ Working | Timeline clustering, favorites, density switcher, paged loading |
+| **SQLite Deduplication Engine** | ✅ Working | SHA-256 index in `autosync.db`, dedup, re-link on re-sync, unsync |
+| **Automation & Rules Engine** | ✅ Working | Plug-in auto-trigger, interval scheduler, battery guard |
+| **Media Preview Pipeline** | ✅ Working | Real thumbnails and playback via the Tauri asset protocol, scoped at runtime |
+| **Background Sync & Cancellation** | ✅ Working | Streaming copy with progress, cancel support, atomic `.part` → rename writes |
+| **System Tray & OS Alerts** | ✅ Working | Tray menu, minimize-to-tray, native notifications |
+| **Audio Synthesizer** | ✅ Working | Web Audio harmonic feedback chimes |
+| **Native Packaging & CI/CD** | ✅ Working | Tag-triggered GitHub release produces `.exe` / `.msi` |
+| **MTP / PTP device support** | ❌ Not implemented | Phones and cameras that expose no drive letter are not discovered yet — see the roadmap below |
+| **Removable-media delete-after-sync** | ❌ Not implemented | The old setting was dead config and has been removed rather than pretending to work |
+
+---
+
+## 🗺️ Roadmap / Known Limitations
+
+- **MTP & PTP devices.** Discovery currently walks drive letters (`D:`–`Z:`), which covers SD cards, USB readers and cameras in mass-storage mode. Android phones and iOS devices speaking only MTP need the Windows Portable Devices API — the hook point is documented at the top of `src-tauri/src/wpd.rs`.
+- **Thumbnails for video.** Video tiles show a play badge and an inline player rather than a decoded first frame, which would need a decoder (e.g. ffmpeg) bundled.
+- **Delete-after-sync** is deliberately not implemented: deleting originals from removable media is destructive and there is no undo, so it should land only with a confirmation flow and verification.
+- **Hashing speed.** Every byte is hashed before a file is copied (single pass, one thread). Large cards are I/O bound on the source; a size/partial-hash pre-filter would cut this further.
 
 ---
 

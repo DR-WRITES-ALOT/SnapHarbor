@@ -13,9 +13,11 @@ import {
   Volume2,
   Clock,
   ExternalLink,
+  FlaskConical,
 } from "lucide-react";
 import { GlassCard } from "../ui/GlassCard";
 import { useSync } from "../../context/SyncContext";
+import { DATE_FORMAT_OPTIONS, sanitizePathComponent } from "../../config/settings";
 
 export const SettingsView: React.FC = () => {
   const { settings, updateSetting, clearHistory, openDestinationFolder } = useSync();
@@ -41,17 +43,22 @@ export const SettingsView: React.FC = () => {
 │   └── 🎥 VID_2004.MP4
 └── 📁 2026-08-26/
     └── 🖼️ IMG_0998.JPG`;
-      case "Device/YYYY-MM":
+      case "Device/YYYY-MM": {
+        // Device names come from the OS (e.g. "Camera Storage (E:)") and are
+        // sanitised before being used as a folder name.
+        const camera = sanitizePathComponent("Camera Storage (E:)");
+        const phone = sanitizePathComponent("Galaxy S23 Ultra");
         return `SnapHarbor_Backups/
-├── 📁 Galaxy_S23_Ultra/
+├── 📁 ${camera}/
 │   └── 📁 2026/
 │       └── 📁 08/
 │           ├── 🖼️ IMG_1001.JPG
 │           └── 🎥 VID_2004.MP4
-└── 📁 Sony_Alpha_SD/
+└── 📁 ${phone}/
     └── 📁 2026/
         └── 📁 08/
             └── 🖼️ DSC_0042.JPG`;
+      }
       case "YYYY/MM":
       default:
         return `SnapHarbor_Backups/
@@ -133,12 +140,39 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { id: "YYYY/MM", label: "Year / Month", example: "2026/08/IMG_001.jpg" },
-              { id: "YYYY-MM-DD", label: "Exact Date", example: "2026-08-27/IMG_001.jpg" },
-              { id: "Device/YYYY-MM", label: "Device / Month", example: "Galaxy_S23/2026/08/..." },
-            ].map((option) => {
+          {/* Date-folder organization toggle (honoured by the Rust sync engine) */}
+          <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/10">
+            <div>
+              <h3 className="text-sm font-medium text-content-primary">Organize Into Date Folders</h3>
+              <p className="text-xs text-content-secondary">
+                When off, every file is written flat into the vault root folder.
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                updateSetting(
+                  "organize_by_date",
+                  settings.organize_by_date === "true" ? "false" : "true",
+                )
+              }
+              className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                settings.organize_by_date === "true" ? "bg-emerald-500" : "bg-white/20"
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
+                  settings.organize_by_date === "true" ? "left-7" : "left-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div
+            className={`grid grid-cols-1 sm:grid-cols-3 gap-3 ${
+              settings.organize_by_date === "true" ? "" : "opacity-40 pointer-events-none"
+            }`}
+          >
+            {DATE_FORMAT_OPTIONS.map((option) => {
               const active = settings.date_format === option.id;
               return (
                 <button
@@ -441,6 +475,42 @@ export const SettingsView: React.FC = () => {
           </div>
         </GlassCard>
 
+        {/* Developer / Demo Mode */}
+        <GlassCard className="p-6 flex flex-col gap-4 border-amber-500/20 bg-amber-950/[0.04]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                <FlaskConical size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-medium text-content-primary">Demo / Simulation Mode</h2>
+                <p className="text-xs text-content-secondary max-w-xl">
+                  Adds labelled demo devices so the interface can be explored without
+                  hardware attached. Demo scans and transfers are simulated: no files
+                  are written to disk and no records are added to your vault index.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() =>
+                updateSetting(
+                  "simulation_enabled",
+                  settings.simulation_enabled === "true" ? "false" : "true",
+                )
+              }
+              className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                settings.simulation_enabled === "true" ? "bg-amber-500" : "bg-white/20"
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
+                  settings.simulation_enabled === "true" ? "left-7" : "left-1"
+                }`}
+              />
+            </button>
+          </div>
+        </GlassCard>
+
         {/* Database Maintenance */}
         <GlassCard className="p-6 flex flex-col gap-4 border-rose-500/20 bg-rose-950/[0.04]">
           <div className="flex items-center justify-between">
@@ -451,7 +521,7 @@ export const SettingsView: React.FC = () => {
               <div>
                 <h2 className="text-base font-medium text-content-primary">Database Maintenance</h2>
                 <p className="text-xs text-content-secondary">
-                  Clear local SQLite history index (does not delete physical backed-up files on disk).
+                  Clear the local SQLite index. Your files on disk are kept — syncing again re-links existing files instead of copying duplicates.
                 </p>
               </div>
             </div>

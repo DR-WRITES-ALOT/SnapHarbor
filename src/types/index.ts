@@ -8,6 +8,10 @@ export interface DeviceInfo {
   total_space_bytes?: number;
   free_space_bytes?: number;
   battery_level?: number;
+  /** True for the built-in demo devices — never a real mount. */
+  is_simulated?: boolean;
+  /** How the device was discovered, for display purposes. */
+  kind?: "removable" | "camera" | "internal" | "simulated";
 }
 
 export interface DiscoveredMediaFile {
@@ -25,7 +29,14 @@ export interface ScanSummary {
   unsynced_count: number;
   unsynced_bytes: number;
   files: DiscoveredMediaFile[];
+  /** True when the listing was produced by the demo/simulation layer. */
+  simulated?: boolean;
+  /** Populated when the scan could not be completed. */
+  error?: string | null;
 }
+
+/** Per-file stage reported while a sync runs. */
+export type SyncPhase = "hashing" | "copying" | "verifying" | "done" | "error";
 
 export interface SyncProgressEvent {
   current_file: string;
@@ -36,8 +47,21 @@ export interface SyncProgressEvent {
   total_bytes: number;
   status: string;
   completed: boolean;
-  error?: string;
-  synced_files?: string[];
+  error?: string | null;
+  phase?: SyncPhase;
+  cancelled?: boolean;
+  simulated?: boolean;
+}
+
+/** Result of a finished (or cancelled) sync run. */
+export interface SyncOutcome {
+  synced: number;
+  adopted: number;
+  skipped_duplicates: number;
+  failed: number;
+  errors: string[];
+  cancelled: boolean;
+  simulated: boolean;
 }
 
 export interface SyncedMediaItem {
@@ -51,6 +75,8 @@ export interface SyncedMediaItem {
   synced_at: string;
   deleted_from_phone: boolean;
   is_favorite?: boolean;
+  /** False when the recorded file is no longer on disk. */
+  file_exists?: boolean;
 }
 
 export interface StorageStats {
@@ -68,11 +94,12 @@ export interface AppSettings {
   auto_sync_interval_mins: string;
   min_battery_threshold: string;
   sound_alerts_enabled: string;
-  delete_after_sync: string;
   skip_duplicates: string;
   include_videos: string;
   enable_notifications: string;
   minimize_to_tray: string;
+  /** Enables the labelled demo devices / simulated transfers. */
+  simulation_enabled: string;
 }
 
 export interface ToastMessage {

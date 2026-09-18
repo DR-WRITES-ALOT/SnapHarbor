@@ -21,8 +21,11 @@ import {
   Camera,
   Filter,
   RotateCcw,
+  X,
+  AlertTriangle,
 } from "lucide-react";
 import { GlassCard } from "../ui/GlassCard";
+import { MediaThumb } from "../ui/MediaThumb";
 import { MediaPreviewModal } from "../ui/MediaPreviewModal";
 import { FolderPickerModal } from "../ui/FolderPickerModal";
 import { useSync } from "../../context/SyncContext";
@@ -86,6 +89,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     syncProgress,
     processedFileNames,
     startSync,
+    cancelSync,
     refreshDevices,
     addSimulatedDevice,
     addToast,
@@ -355,7 +359,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
           {showDeviceDropdown && (
             <div className="absolute top-full left-0 right-0 mt-2 p-3 rounded-2xl bg-[#121226]/95 border border-white/15 backdrop-blur-xl shadow-2xl z-50 flex flex-col gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-content-secondary px-2">
-                Available & Simulated Devices
+                Connected devices & demo simulator
+              </span>
+              <span className="px-2 text-[10px] text-content-secondary/70">
+                Demo entries are simulated and never write files or vault records.
               </span>
               <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
                 {simulatedDevicePresets.map((preset) => {
@@ -464,8 +471,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
           {isSyncing && syncProgress && (
             <span className="text-xs text-content-secondary animate-pulse truncate max-w-xs">
+              {syncProgress.phase ? `[${syncProgress.phase}] ` : ""}
               {syncProgress.status} ({syncProgress.current_file})
             </span>
+          )}
+
+          {isSyncing && (
+            <button
+              onClick={cancelSync}
+              className="px-4 py-2 rounded-xl text-xs font-medium text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-600 border border-rose-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <X size={13} /> Cancel Sync
+            </button>
           )}
         </div>
 
@@ -484,6 +501,23 @@ export const Dashboard: React.FC<DashboardProps> = () => {
           </span>
         </div>
       </div>
+
+      {/* Demo mode notice */}
+      {selectedDevice?.is_simulated && (
+        <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-0.5 text-xs">
+            <span className="font-semibold text-amber-100">
+              Demo device: {selectedDevice.name}
+            </span>
+            <span className="opacity-90">
+              This device is simulated. Transfers are clearly labelled demo runs — no
+              files are written to disk and nothing is added to your vault index.
+              Deselect it to work with a real camera, SD card, or phone volume.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Media Grid */}
       <div className="flex flex-col gap-4 mt-2 pb-16">
@@ -511,6 +545,26 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 <CheckCircle2 size={32} className="text-emerald-400" />
                 <span className="text-content-primary font-medium">All Media Synchronized</span>
                 <span className="text-xs">No unsynced files remain on this device.</span>
+              </div>
+            ) : scanSummary?.error ? (
+              <div className="flex flex-col items-center gap-2">
+                <AlertTriangle size={32} className="text-rose-400" />
+                <span className="text-content-primary font-medium">Scan failed</span>
+                <span className="text-xs max-w-md">{scanSummary.error}</span>
+              </div>
+            ) : scanSummary && scanSummary.total_discovered === 0 ? (
+              <div className="flex flex-col items-center gap-2">
+                <FolderDown size={32} className="text-content-secondary/50" />
+                <span className="text-content-primary font-medium">
+                  {selectedDevice
+                    ? `No photos or videos found on ${selectedDevice.name}`
+                    : "No device selected"}
+                </span>
+                <span className="text-xs max-w-md">
+                  {selectedDevice?.mount_path
+                    ? `Scanned ${selectedDevice.mount_path}. Supported photos and videos inside DCIM or Pictures are picked up automatically.`
+                    : "Mount a camera, SD card, or phone volume with a drive letter and refresh the device list."}
+                </span>
               </div>
             ) : (
               <span>No media matches the current filter or search criteria.</span>
@@ -544,12 +598,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                   }`}
                 >
                   <div className="relative aspect-square rounded-xl overflow-hidden bg-black/40 flex items-center justify-center">
-                    {/* Media thumbnail */}
-                    <img
-                      src={`https://picsum.photos/seed/${idx + 120}/300/300`}
+                    {/* Media thumbnail, read straight from the device path */}
+                    <MediaThumb
+                      path={item.source_path}
+                      isVideo={item.is_video}
                       alt={item.name}
+                      showVideoBadge={false}
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      loading="lazy"
                     />
 
                     {/* Hover Overlay with Preview */}
