@@ -23,8 +23,12 @@ async function invokeTauri<T>(cmd: string, args?: Record<string, unknown>): Prom
   return fallbackInvoke<T>(cmd, args);
 }
 
+// In-memory mock store for favorites & synced paths in browser testing mode
+const mockFavorites = new Set<number>([1, 4, 7]);
+const simulatedSyncedPaths = new Set<string>();
+
 // Fallback handlers for browser development / mock testing
-function fallbackInvoke<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
+function fallbackInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "get_devices":
       return Promise.resolve([
@@ -56,6 +60,9 @@ function fallbackInvoke<T>(cmd: string, _args?: Record<string, unknown>): Promis
         organize_by_date: "true",
         date_format: "YYYY/MM",
         auto_sync_on_connect: "false",
+        auto_sync_interval_mins: "0",
+        min_battery_threshold: "20",
+        sound_alerts_enabled: "true",
         delete_after_sync: "false",
         skip_duplicates: "true",
         include_videos: "true",
@@ -68,45 +75,115 @@ function fallbackInvoke<T>(cmd: string, _args?: Record<string, unknown>): Promis
 
     case "get_storage_stats":
       return Promise.resolve({
-        total_files_synced: 1420,
-        total_bytes_synced: 48_500_000_000,
+        total_files_synced: 1420 + simulatedSyncedPaths.size,
+        total_bytes_synced: 48_500_000_000 + simulatedSyncedPaths.size * 5_000_000,
         total_devices_connected: 2,
         last_sync_timestamp: new Date().toISOString(),
       } as unknown as T);
 
     case "get_recent_media":
-      return Promise.resolve(
-        Array.from({ length: 12 }).map((_, i) => ({
+    case "get_vault_gallery": {
+      const favoritesOnly = args?.favoritesOnly as boolean | undefined;
+      const deviceId = args?.deviceId as string | undefined;
+
+      const items = Array.from({ length: 32 }).map((_, i) => {
+        const isVideo = i % 6 === 0;
+        const dev = i % 2 === 0 ? "galaxy_s23_ultra" : "sony_alpha_sd";
+        const dateOffset = i * 4 * 3600000;
+        const date = new Date(Date.now() - dateOffset);
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+
+        return {
           id: i + 1,
-          device_id: "galaxy_s23_ultra",
-          local_path: `C:\\Users\\Photos\\SnapHarbor_Backups\\2026\\08\\IMG_${2400 + i}.JPG`,
-          file_size_bytes: 4_800_000 + i * 250_000,
+          device_id: dev,
+          remote_path: `/DCIM/Camera/IMG_${2400 + i}.${isVideo ? "MP4" : "JPG"}`,
+          local_path: `C:\\Users\\Photos\\SnapHarbor_Backups\\${y}\\${m}\\IMG_${2400 + i}.${isVideo ? "MP4" : "JPG"}`,
+          file_size_bytes: isVideo ? 42_000_000 + i * 2_000_000 : 4_800_000 + i * 250_000,
           file_hash_sha256: `hash_mock_${i}`,
-          synced_at: new Date(Date.now() - i * 3600000).toISOString(),
+          media_created_at: date.toISOString(),
+          synced_at: new Date(Date.now() - i * 1800000).toISOString(),
           deleted_from_phone: false,
-        })) as unknown as T
-      );
+          is_favorite: mockFavorites.has(i + 1),
+        };
+      });
 
-    case "scan_device_media":
-      return Promise.resolve({
-        total_discovered: 24,
-        total_bytes: 148_000_000,
-        unsynced_count: 24,
-        unsynced_bytes: 148_000_000,
-        files: Array.from({ length: 24 }).map((_, i) => ({
-          name: `IMG_${1000 + i}.${i % 5 === 0 ? "MP4" : "JPG"}`,
-          source_path: `/DCIM/Camera/IMG_${1000 + i}.${i % 5 === 0 ? "MP4" : "JPG"}`,
-          file_size_bytes: i % 5 === 0 ? 38_000_000 : 4_500_000 + i * 150_000,
+      let filtered = items;
+      if (deviceId) {
+        filtered = filtered.filter((item) => item.device_id === deviceId);
+      }
+      if (favoritesOnly) {
+        filtered = filtered.filter((item) => item.is_favorite);
+      }
+
+      return Promise.resolve(filtered as unknown as T);
+    }
+
+    case "toggle_media_favorite": {
+      const mediaId = args?.mediaId as number;
+      if (mockFavorites.has(mediaId)) {
+        mockFavorites.delete(mediaId);
+        return Promise.resolve(false as unknown as T);
+      } else {
+        mockFavorites.add(mediaId);
+        return Promise.resolve(true as unknown as T);
+      }
+    }
+
+    case "scan_device_media": {
+      const files = Array.from({ length: 24 }).map((_, i) => {
+        const isVideo = i % 5 === 0;
+        const name = `IMG_${1000 + i}.${isVideo ? "MP4" : "JPG"}`;
+        const source_path = `/DCIM/Camera/${name}`;
+        const is_synced = simulatedSyncedPaths.has(source_path);
+        return {
+          name,
+          source_path,
+          file_size_bytes: isVideo ? 38_000_000 : 4_500_000 + i * 150_000,
           created_at: new Date(Date.now() - i * 86400000).toISOString(),
-          is_video: i % 5 === 0,
-        })),
+          is_video: isVideo,
+          is_synced,
+        };
+      });
+
+      const total_bytes = files.reduce((acc, f) => acc + f.file_size_bytes, 0);
+      const unsynced = files.filter((f) => !f.is_synced);
+      const unsynced_bytes = unsynced.reduce((acc, f) => acc + f.file_size_bytes, 0);
+
+      return Promise.resolve({
+        total_discovered: files.length,
+        total_bytes,
+        unsynced_count: unsynced.length,
+        unsynced_bytes,
+        files,
       } as unknown as T);
+    }
 
-    case "start_sync":
+    case "start_sync": {
+      const selected = (args?.selectedFileNames as string[]) || [];
+      if (selected.length > 0) {
+        selected.forEach((name) => simulatedSyncedPaths.add(`/DCIM/Camera/${name}`));
+      } else {
+        for (let i = 0; i < 24; i++) {
+          const isVideo = i % 5 === 0;
+          simulatedSyncedPaths.add(`/DCIM/Camera/IMG_${1000 + i}.${isVideo ? "MP4" : "JPG"}`);
+        }
+      }
       return Promise.resolve(24 as unknown as T);
+    }
 
-    case "clear_sync_history":
+    case "unsync_media_item": {
+      const remotePath = args?.remotePath as string | undefined;
+      if (remotePath) {
+        simulatedSyncedPaths.delete(remotePath);
+      }
       return Promise.resolve(true as unknown as T);
+    }
+
+    case "clear_sync_history": {
+      simulatedSyncedPaths.clear();
+      return Promise.resolve(true as unknown as T);
+    }
 
     case "send_desktop_notification":
       return Promise.resolve(undefined as unknown as T);
@@ -123,10 +200,16 @@ export const tauriApi = {
     invokeTauri<boolean>("update_app_setting", { key, value }),
   getStorageStats: () => invokeTauri<StorageStats>("get_storage_stats"),
   getRecentMedia: (limit?: number) =>
-    invokeTauri<SyncedMediaItem[]>("get_recent_media", { limit }),
+    invokeTauri<SyncedMediaItem[]>("get_recent_media", { limit: limit || 12 }),
+  getVaultGallery: (limit?: number, deviceId?: string, favoritesOnly?: boolean) =>
+    invokeTauri<SyncedMediaItem[]>("get_vault_gallery", { limit: limit || 100, deviceId, favoritesOnly }),
+  toggleMediaFavorite: (mediaId: number) =>
+    invokeTauri<boolean>("toggle_media_favorite", { mediaId }),
   clearSyncHistory: () => invokeTauri<boolean>("clear_sync_history"),
   scanDeviceMedia: (deviceId: string, path?: string) =>
     invokeTauri<ScanSummary>("scan_device_media", { deviceId, path }),
+  unsyncMediaItem: (deviceId: string, remotePath: string) =>
+    invokeTauri<boolean>("unsync_media_item", { deviceId, remotePath }),
   startSync: (
     deviceId: string,
     deviceName: string,

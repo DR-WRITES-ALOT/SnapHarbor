@@ -3,9 +3,8 @@ mod sync_engine;
 mod wpd;
 
 use db::{NewSyncedMedia, StorageStats, SyncedMediaItem};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use sync_engine::{
     calculate_file_sha256, copy_media_file_safe, generate_destination_path,
@@ -42,6 +41,9 @@ fn get_app_settings(state: State<'_, AppState>) -> Result<HashMap<String, String
         "organize_by_date",
         "date_format",
         "auto_sync_on_connect",
+        "auto_sync_interval_mins",
+        "min_battery_threshold",
+        "sound_alerts_enabled",
         "delete_after_sync",
         "skip_duplicates",
         "include_videos",
@@ -87,6 +89,48 @@ fn get_recent_media(
 }
 
 #[tauri::command]
+fn get_vault_gallery(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+    device_id: Option<String>,
+    favorites_only: Option<bool>,
+) -> Result<Vec<SyncedMediaItem>, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::get_synced_media(
+        conn,
+        limit,
+        device_id.as_deref(),
+        favorites_only.unwrap_or(false),
+    ).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn toggle_media_favorite(
+    state: State<'_, AppState>,
+    media_id: i64,
+) -> Result<bool, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::toggle_favorite(conn, media_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unsync_media_item(
+    state: State<'_, AppState>,
+    device_id: String,
+    remote_path: String,
+) -> Result<bool, String> {
+    let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = lock.as_ref().ok_or("Database not initialized")?;
+
+    db::unsync_media_by_remote_path(conn, &device_id, &remote_path).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
 fn clear_sync_history(state: State<'_, AppState>) -> Result<bool, String> {
     let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
     let conn = lock.as_ref().ok_or("Database not initialized")?;
@@ -118,24 +162,34 @@ fn scan_device_media(
         for i in 1..=24 {
             let is_video = i % 5 == 0;
             let size = if is_video { 45_000_000 + i * 2_500_000 } else { 3_500_000 + i * 400_000 };
+            let source_path = format!("/storage/emulated/0/DCIM/Camera/IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" });
+            let is_synced = db::is_remote_path_or_hash_synced(conn, &device_id, &source_path);
+
             discovered.push(DiscoveredMediaFile {
                 name: format!("IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" }),
-                source_path: format!("/storage/emulated/0/DCIM/Camera/IMG_{:04}.{}", 1000 + i, if is_video { "MP4" } else { "JPG" }),
+                source_path,
                 file_size_bytes: size as u64,
                 created_at: Some(chrono::Utc::now().to_rfc3339()),
                 is_video,
+                is_synced,
             });
+        }
+    } else {
+        for file in &mut discovered {
+            file.is_synced = db::is_remote_path_or_hash_synced(conn, &device_id, &file.source_path);
         }
     }
 
     let total_discovered = discovered.len();
     let total_bytes: u64 = discovered.iter().map(|f| f.file_size_bytes).sum();
+    let unsynced_count = discovered.iter().filter(|f| !f.is_synced).count();
+    let unsynced_bytes: u64 = discovered.iter().filter(|f| !f.is_synced).map(|f| f.file_size_bytes).sum();
 
     Ok(ScanSummary {
         total_discovered,
         total_bytes,
-        unsynced_count: total_discovered,
-        unsynced_bytes: total_bytes,
+        unsynced_count,
+        unsynced_bytes,
         files: discovered,
     })
 }
@@ -207,7 +261,6 @@ async fn start_sync(
         let total_bytes: u64 = files_to_sync.iter().map(|f| f.file_size_bytes).sum();
         let mut copied_bytes: u64 = 0;
         let mut synced_count = 0;
-        let mut synced_names = Vec::new();
 
         for (idx, item) in files_to_sync.iter().enumerate() {
             let src = PathBuf::from(&item.source_path);
@@ -233,7 +286,6 @@ async fn start_sync(
                 if let Ok(bytes) = copy_media_file_safe(&src, &target) {
                     copied_bytes += bytes;
                     synced_count += 1;
-                    synced_names.push(item.name.clone());
 
                     // Record in DB
                     let lock = state.db_conn.lock().map_err(|e| e.to_string())?;
@@ -252,7 +304,6 @@ async fn start_sync(
                 }
             } else {
                 copied_bytes += item.file_size_bytes;
-                synced_names.push(item.name.clone());
             }
 
             let percent = (((idx + 1) as f64 / total_files as f64) * 100.0) as u32;
@@ -424,7 +475,6 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Read minimize_to_tray setting
                 let state = window.state::<AppState>();
                 let should_minimize = {
                     if let Ok(lock) = state.db_conn.lock() {
@@ -450,8 +500,11 @@ pub fn run() {
             update_app_setting,
             get_storage_stats,
             get_recent_media,
+            get_vault_gallery,
+            toggle_media_favorite,
             scan_device_media,
             clear_sync_history,
+            unsync_media_item,
             send_desktop_notification,
             start_sync
         ])

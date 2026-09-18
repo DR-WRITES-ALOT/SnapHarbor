@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type {
   DeviceInfo,
   AppSettings,
@@ -10,6 +10,7 @@ import type {
   DiscoveredMediaFile,
 } from "../types";
 import { tauriApi } from "../services/tauriApi";
+import { soundEffects } from "../services/soundEffects";
 
 interface SyncContextType {
   devices: DeviceInfo[];
@@ -19,6 +20,7 @@ interface SyncContextType {
   updateSetting: (key: keyof AppSettings, value: string) => Promise<void>;
   storageStats: StorageStats | null;
   recentMedia: SyncedMediaItem[];
+  galleryMedia: SyncedMediaItem[];
   scanSummary: ScanSummary | null;
   isScanning: boolean;
   isSyncing: boolean;
@@ -27,6 +29,9 @@ interface SyncContextType {
   startSync: (selectedFiles?: DiscoveredMediaFile[]) => Promise<void>;
   refreshDevices: () => Promise<void>;
   refreshStorageStats: () => Promise<void>;
+  refreshGallery: (deviceId?: string, favoritesOnly?: boolean) => Promise<void>;
+  toggleFavorite: (mediaId: number) => Promise<void>;
+  unsyncMedia: (deviceId: string, remotePath: string, fileName: string) => Promise<void>;
   clearHistory: () => Promise<void>;
   openDestinationFolder: () => Promise<void>;
   addSimulatedDevice: (device: DeviceInfo) => void;
@@ -40,6 +45,9 @@ const defaultSettings: AppSettings = {
   organize_by_date: "true",
   date_format: "YYYY/MM",
   auto_sync_on_connect: "false",
+  auto_sync_interval_mins: "0",
+  min_battery_threshold: "20",
+  sound_alerts_enabled: "true",
   delete_after_sync: "false",
   skip_duplicates: "true",
   include_videos: "true",
@@ -55,6 +63,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [recentMedia, setRecentMedia] = useState<SyncedMediaItem[]>([]);
+  const [galleryMedia, setGalleryMedia] = useState<SyncedMediaItem[]>([]);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -62,16 +71,22 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [processedFileNames, setProcessedFileNames] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  const prevDeviceIdRef = useRef<string | null>(null);
+
   const addToast = useCallback(
     (title: string, description: string, type: ToastMessage["type"] = "info") => {
       const id = `${Date.now()}_${Math.random()}`;
       setToasts((prev) => [...prev, { id, title, description, type }]);
 
+      if (settings.sound_alerts_enabled === "true" && type === "warning") {
+        soundEffects.playWarning();
+      }
+
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
       }, 5000);
     },
-    []
+    [settings.sound_alerts_enabled]
   );
 
   const dismissToast = useCallback((id: string) => {
@@ -101,6 +116,38 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const refreshGallery = useCallback(async (deviceId?: string, favoritesOnly?: boolean) => {
+    try {
+      const gallery = await tauriApi.getVaultGallery(100, deviceId, favoritesOnly);
+      setGalleryMedia(gallery);
+    } catch (e) {
+      console.error("Failed to fetch vault gallery:", e);
+    }
+  }, []);
+
+  const toggleFavorite = useCallback(async (mediaId: number) => {
+    try {
+      const isFav = await tauriApi.toggleMediaFavorite(mediaId);
+      setGalleryMedia((prev) =>
+        prev.map((item) =>
+          item.id === mediaId ? { ...item, is_favorite: isFav } : item
+        )
+      );
+      setRecentMedia((prev) =>
+        prev.map((item) =>
+          item.id === mediaId ? { ...item, is_favorite: isFav } : item
+        )
+      );
+      addToast(
+        isFav ? "Added to Favorites" : "Removed from Favorites",
+        `Updated photo status in vault.`,
+        "info"
+      );
+    } catch (e) {
+      console.error("Failed to toggle favorite:", e);
+    }
+  }, [addToast]);
+
   const refreshScan = useCallback(async (device: DeviceInfo) => {
     setIsScanning(true);
     try {
@@ -117,12 +164,13 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     tauriApi.getAppSettings().then((s) => {
       if (s && Object.keys(s).length > 0) {
-        setSettings(s);
+        setSettings((prev) => ({ ...prev, ...s }));
       }
     });
     refreshDevices();
     refreshStorageStats();
-  }, [refreshDevices, refreshStorageStats]);
+    refreshGallery();
+  }, [refreshDevices, refreshStorageStats, refreshGallery]);
 
   useEffect(() => {
     if (selectedDevice) {
@@ -145,13 +193,33 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (selectedFiles?: DiscoveredMediaFile[]) => {
       if (isSyncing || !selectedDevice) return;
 
-      const targetList =
+      const targetList = (
         selectedFiles && selectedFiles.length > 0
           ? selectedFiles
-          : scanSummary?.files || [];
+          : scanSummary?.files || []
+      ).filter((f) => !f.is_synced && !processedFileNames.has(f.name));
 
       if (targetList.length === 0) {
-        addToast("No Media", "No media files available to sync.", "warning");
+        addToast(
+          "Already Backed Up",
+          "The selected items are already safely backed up in your vault.",
+          "info"
+        );
+        return;
+      }
+
+      // Battery Guard Check
+      const minBattery = parseInt(settings.min_battery_threshold || "0", 10);
+      if (
+        selectedDevice.battery_level !== undefined &&
+        minBattery > 0 &&
+        selectedDevice.battery_level < minBattery
+      ) {
+        addToast(
+          "Battery Guard Active",
+          `Device battery is ${selectedDevice.battery_level}% (below ${minBattery}% safety threshold). Please charge device before syncing.`,
+          "warning"
+        );
         return;
       }
 
@@ -190,6 +258,15 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (progress.completed) {
             setIsSyncing(false);
             refreshStorageStats();
+            refreshGallery();
+            if (selectedDevice) {
+              refreshScan(selectedDevice);
+            }
+
+            // Sound chime on completion
+            if (settings.sound_alerts_enabled === "true") {
+              soundEffects.playSyncComplete();
+            }
 
             // Add synced items to processed set
             if (progress.synced_files) {
@@ -227,13 +304,106 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     },
-    [isSyncing, selectedDevice, scanSummary, settings.enable_notifications, refreshStorageStats, addToast]
+    [
+      isSyncing,
+      selectedDevice,
+      scanSummary,
+      settings.enable_notifications,
+      settings.sound_alerts_enabled,
+      settings.min_battery_threshold,
+      refreshStorageStats,
+      refreshGallery,
+      addToast,
+    ]
+  );
+
+  // Auto-Sync on Device Connect Trigger
+  useEffect(() => {
+    if (!selectedDevice) return;
+
+    const isNewDevice = prevDeviceIdRef.current !== selectedDevice.id;
+    prevDeviceIdRef.current = selectedDevice.id;
+
+    if (isNewDevice && selectedDevice.is_connected) {
+      if (settings.sound_alerts_enabled === "true") {
+        soundEffects.playDeviceConnected();
+      }
+
+      if (settings.auto_sync_on_connect === "true" && !isSyncing) {
+        // Wait 1.5s for scan summary to settle, then start sync
+        const timer = setTimeout(() => {
+          addToast(
+            "Auto-Sync Triggered",
+            `Automatic backup initiated for ${selectedDevice.name}`,
+            "info"
+          );
+          startSync();
+        }, 1500);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedDevice, settings.auto_sync_on_connect, settings.sound_alerts_enabled, isSyncing, startSync, addToast]);
+
+  // Interval Background Sync Scheduler
+  useEffect(() => {
+    const intervalMins = parseInt(settings.auto_sync_interval_mins || "0", 10);
+    if (intervalMins <= 0) return;
+
+    const intervalMs = intervalMins * 60 * 1000;
+    const intervalId = setInterval(() => {
+      if (
+        selectedDevice?.is_connected &&
+        !isSyncing &&
+        scanSummary &&
+        scanSummary.unsynced_count > 0
+      ) {
+        addToast(
+          "Scheduled Sync",
+          `Running periodic backup (${intervalMins}m interval)...`,
+          "info"
+        );
+        startSync();
+      }
+    }, intervalMs);
+
+    return () => clearInterval(intervalId);
+  }, [settings.auto_sync_interval_mins, selectedDevice, isSyncing, scanSummary, startSync, addToast]);
+
+  const unsyncMedia = useCallback(
+    async (deviceId: string, remotePath: string, fileName: string) => {
+      try {
+        await tauriApi.unsyncMediaItem(deviceId, remotePath);
+        setProcessedFileNames((prev) => {
+          const next = new Set(prev);
+          next.delete(fileName);
+          return next;
+        });
+
+        if (selectedDevice) {
+          await refreshScan(selectedDevice);
+        }
+        await refreshStorageStats();
+        await refreshGallery();
+
+        addToast(
+          "Media Unsynced",
+          `"${fileName}" has been marked as unsynced and can be backed up again.`,
+          "info"
+        );
+      } catch (e) {
+        console.error("Failed to unsync media:", e);
+        addToast("Error", "Could not unsync media item.", "error");
+      }
+    },
+    [selectedDevice, refreshScan, refreshStorageStats, refreshGallery, addToast]
   );
 
   const clearHistory = async () => {
     try {
       await tauriApi.clearSyncHistory();
       await refreshStorageStats();
+      await refreshGallery();
       setProcessedFileNames(new Set());
       addToast("Database Reset", "All past synchronization records cleared.", "info");
     } catch (e) {
@@ -286,6 +456,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateSetting,
         storageStats,
         recentMedia,
+        galleryMedia,
         scanSummary,
         isScanning,
         isSyncing,
@@ -294,6 +465,9 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         startSync,
         refreshDevices,
         refreshStorageStats,
+        refreshGallery,
+        toggleFavorite,
+        unsyncMedia,
         clearHistory,
         openDestinationFolder,
         addSimulatedDevice,

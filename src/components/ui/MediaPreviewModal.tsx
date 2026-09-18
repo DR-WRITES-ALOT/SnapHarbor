@@ -11,6 +11,7 @@ import {
   Video,
   Image as ImageIcon,
   Check,
+  RotateCcw,
 } from "lucide-react";
 import type { DiscoveredMediaFile } from "../../types";
 
@@ -21,6 +22,7 @@ interface MediaPreviewModalProps {
   onSelectIndex: (index: number) => void;
   isSelected: boolean;
   onToggleSelect: (index: number) => void;
+  onUnsync?: (item: DiscoveredMediaFile) => void;
 }
 
 export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
@@ -30,6 +32,7 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
   onSelectIndex,
   isSelected,
   onToggleSelect,
+  onUnsync,
 }) => {
   const [zoom, setZoom] = useState(1);
 
@@ -225,23 +228,44 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
 
           {/* Bottom Actions */}
           <div className="flex flex-col gap-3 mt-6">
-            <button
-              onClick={() => onToggleSelect(currentIndex)}
-              className={`w-full py-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                isSelected
-                  ? "bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)]"
-                  : "bg-content-accent/20 hover:bg-content-accent/30 text-content-primary border border-content-accent/30"
-              }`}
-            >
-              <div
-                className={`w-4 h-4 rounded-md border flex items-center justify-center ${
-                  isSelected ? "border-white bg-white text-emerald-600" : "border-white/40"
+            {currentItem.is_synced ? (
+              <div className="flex flex-col gap-2">
+                <div className="w-full py-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400">
+                  <Check size={14} />
+                  <span>Already Backed Up in Vault</span>
+                </div>
+
+                {onUnsync && (
+                  <button
+                    onClick={() => {
+                      onUnsync(currentItem);
+                    }}
+                    className="w-full py-2.5 rounded-xl text-xs font-medium text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-600 border border-rose-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Unsync this File</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => onToggleSelect(currentIndex)}
+                className={`w-full py-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  isSelected
+                    ? "bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+                    : "bg-content-accent/20 hover:bg-content-accent/30 text-content-primary border border-content-accent/30"
                 }`}
               >
-                {isSelected && <Check size={12} />}
-              </div>
-              <span>{isSelected ? "Selected for Sync" : "Select this Item"}</span>
-            </button>
+                <div
+                  className={`w-4 h-4 rounded-md border flex items-center justify-center ${
+                    isSelected ? "border-white bg-white text-emerald-600" : "border-white/40"
+                  }`}
+                >
+                  {isSelected && <Check size={12} />}
+                </div>
+                <span>{isSelected ? "Selected for Sync" : "Select this Item"}</span>
+              </button>
+            )}
 
             <button
               onClick={onClose}
@@ -255,3 +279,4 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
     </div>
   );
 };
+

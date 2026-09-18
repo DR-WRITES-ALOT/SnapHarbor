@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
@@ -14,6 +14,7 @@ pub struct DiscoveredMediaFile {
     pub file_size_bytes: u64,
     pub created_at: Option<String>,
     pub is_video: bool,
+    pub is_synced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +104,7 @@ pub fn scan_directory_media(source_dir: &Path, include_videos: bool) -> Vec<Disc
                         file_size_bytes,
                         created_at,
                         is_video,
+                        is_synced: false,
                     });
                 }
             }

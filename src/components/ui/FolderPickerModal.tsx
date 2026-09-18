@@ -17,56 +17,40 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({ isOpen, on
   const presets = [
     {
       title: "Pictures / SnapHarbor",
-      path: "C:\\Users\\User\\Pictures\\SnapHarbor",
+      path: "C:\\Users\\Photos\\Pictures\\SnapHarbor",
       icon: "pictures",
     },
     {
-      title: "Desktop / Photo Vault",
-      path: "C:\\Users\\User\\Desktop\\Photo_Vault",
+      title: "Desktop / Photo_Vault",
+      path: "C:\\Users\\Photos\\Desktop\\Photo_Vault",
       icon: "desktop",
     },
     {
-      title: "Secondary Drive (D:\\)",
-      path: "D:\\Backups\\SnapHarbor",
-      icon: "drive",
+      title: "D: Drive / Backups / MediaVault",
+      path: "D:\\Backups\\MediaVault",
+      icon: "drive_d",
     },
     {
-      title: "External Storage (E:\\)",
+      title: "E: Drive / ExternalArchive",
       path: "E:\\External_Storage\\MediaArchive",
-      icon: "external",
+      icon: "drive_e",
     },
   ];
 
   const handleSave = async () => {
-    if (selectedPath.trim()) {
-      await updateSetting("destination_folder", selectedPath.trim());
-      addToast("Destination Updated", `Save path set to: ${selectedPath.trim()}`, "success");
-      onClose();
+    if (!selectedPath.trim()) {
+      addToast("Invalid Path", "Please provide a valid folder path.", "warning");
+      return;
     }
-  };
-
-  const handleNativeBrowse = async () => {
-    try {
-      // In modern browsers, window.showDirectoryPicker() provides a native OS folder chooser
-      if ("showDirectoryPicker" in window) {
-        // @ts-expect-error browser showDirectoryPicker API
-        const dirHandle = await window.showDirectoryPicker();
-        if (dirHandle?.name) {
-          const simulatedPath = `C:\\Users\\User\\Pictures\\${dirHandle.name}`;
-          setSelectedPath(simulatedPath);
-          addToast("Folder Selected", `Chosen: ${dirHandle.name}`, "info");
-        }
-      } else {
-        addToast("Directory Selector", "Type custom folder path below", "info");
-      }
-    } catch {
-      // User cancelled dialog
-    }
+    await updateSetting("destination_folder", selectedPath.trim());
+    addToast("Destination Updated", `Save folder set to ${selectedPath.trim()}`, "success");
+    onClose();
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-sm select-none">
+        {/* Backdrop */}
         <div className="absolute inset-0" onClick={onClose} />
 
         <motion.div
@@ -74,112 +58,99 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({ isOpen, on
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
           transition={{ duration: 0.2 }}
-          className="relative z-10 w-full max-w-lg bg-[#111124]/95 border border-white/15 rounded-3xl p-6 shadow-2xl flex flex-col gap-6"
+          className="relative z-10 w-full max-w-lg bg-[#121226]/95 border border-white/15 rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl backdrop-blur-xl"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header */}
+          {/* Modal Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                <Folder size={20} />
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shadow-[0_0_15px_rgba(168,85,247,0.2)]">
+                <FolderOpen size={20} />
               </div>
-              <div>
-                <h3 className="text-lg font-semibold text-content-primary">
-                  Select Backup Destination
+              <div className="flex flex-col">
+                <h3 className="text-base font-semibold text-content-primary">
+                  Choose Save Destination
                 </h3>
-                <p className="text-xs text-content-secondary">
-                  Choose where imported media will be saved on your computer.
-                </p>
+                <span className="text-xs text-content-secondary">
+                  Where photos and videos will be stored
+                </span>
               </div>
             </div>
+
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-content-secondary hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-content-secondary hover:text-white flex items-center justify-center transition-colors cursor-pointer"
             >
               <X size={16} />
             </button>
           </div>
 
-          {/* Quick Presets */}
+          {/* Custom Path Input */}
           <div className="flex flex-col gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-secondary">
-              Common Backup Locations
-            </span>
+            <label className="text-xs font-medium text-content-secondary">
+              Custom Directory Path
+            </label>
+            <div className="flex items-center gap-2 p-2 rounded-2xl bg-white/[0.04] border border-white/10 focus-within:border-purple-500/50 transition-all">
+              <Folder size={18} className="text-purple-400 ml-2 shrink-0" />
+              <input
+                type="text"
+                value={selectedPath}
+                onChange={(e) => setSelectedPath(e.target.value)}
+                placeholder="e.g. C:\Backups\SnapHarbor"
+                className="bg-transparent border-none outline-none text-xs font-mono text-content-primary w-full px-2"
+              />
+            </div>
+          </div>
 
-            <div className="grid grid-cols-1 gap-2">
+          {/* Recommended Presets */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-content-secondary">
+              Quick Storage Presets
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {presets.map((preset) => {
                 const isSelected = selectedPath === preset.path;
                 return (
-                  <button
+                  <div
                     key={preset.path}
                     onClick={() => setSelectedPath(preset.path)}
                     className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
                       isSelected
-                        ? "bg-purple-500/15 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.2)]"
-                        : "bg-white/[0.03] border-white/10 hover:bg-white/[0.06]"
+                        ? "bg-purple-500/20 border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.2)]"
+                        : "bg-white/[0.03] border-white/5 hover:bg-white/[0.06] hover:border-white/10"
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                          isSelected ? "bg-purple-500 text-white" : "bg-white/10 text-content-secondary"
-                        }`}
-                      >
-                        <HardDrive size={16} />
-                      </div>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <HardDrive size={16} className={isSelected ? "text-purple-300" : "text-content-secondary"} />
                       <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-content-primary">
+                        <span className="text-xs font-medium text-content-primary truncate">
                           {preset.title}
                         </span>
-                        <span className="text-[10px] font-mono text-content-secondary truncate">
+                        <span className="text-[10px] font-mono text-content-secondary truncate opacity-70">
                           {preset.path}
                         </span>
                       </div>
                     </div>
-                    {isSelected && <Check size={16} className="text-purple-400 shrink-0" />}
-                  </button>
+                    {isSelected && <Check size={14} className="text-purple-400 shrink-0" />}
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Custom Path Input & Browse */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-content-secondary">
-                Custom Folder Path
-              </span>
-              <button
-                onClick={handleNativeBrowse}
-                className="text-xs text-content-accent hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <FolderOpen size={12} /> Browse PC...
-              </button>
-            </div>
-
-            <input
-              type="text"
-              value={selectedPath}
-              onChange={(e) => setSelectedPath(e.target.value)}
-              placeholder="e.g. C:\Users\Username\Pictures\SnapHarbor"
-              className="w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-xs font-mono text-content-primary placeholder:text-content-secondary focus:outline-none focus:border-purple-500 transition-colors"
-            />
-          </div>
-
-          {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-3 pt-2">
+          {/* Modal Actions */}
+          <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/5">
             <button
               onClick={onClose}
               className="px-5 py-2.5 rounded-xl text-xs font-medium text-content-secondary hover:text-content-primary bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
             >
               Cancel
             </button>
-
             <button
               onClick={handleSave}
-              className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(168,85,247,0.3)] cursor-pointer"
+              className="px-6 py-2.5 rounded-xl text-xs font-semibold text-white bg-purple-600 hover:bg-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.3)] transition-all cursor-pointer"
             >
-              <Check size={14} /> Set Save Destination
+              Set Destination
             </button>
           </div>
         </motion.div>

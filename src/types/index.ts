@@ -16,6 +16,7 @@ export interface DiscoveredMediaFile {
   file_size_bytes: number;
   created_at?: string;
   is_video: boolean;
+  is_synced?: boolean;
 }
 
 export interface ScanSummary {
@@ -49,6 +50,7 @@ export interface SyncedMediaItem {
   media_created_at?: string;
   synced_at: string;
   deleted_from_phone: boolean;
+  is_favorite?: boolean;
 }
 
 export interface StorageStats {
@@ -63,6 +65,9 @@ export interface AppSettings {
   organize_by_date: string;
   date_format: string;
   auto_sync_on_connect: string;
+  auto_sync_interval_mins: string;
+  min_battery_threshold: string;
+  sound_alerts_enabled: string;
   delete_after_sync: string;
   skip_duplicates: string;
   include_videos: string;

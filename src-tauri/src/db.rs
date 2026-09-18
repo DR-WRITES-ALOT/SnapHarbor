@@ -13,6 +13,7 @@ pub struct SyncedMediaItem {
     pub media_created_at: Option<String>,
     pub synced_at: String,
     pub deleted_from_phone: bool,
+    pub is_favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,10 +70,14 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
             media_created_at DATETIME,
             synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             deleted_from_phone INTEGER DEFAULT 0,
+            is_favorite INTEGER DEFAULT 0,
             FOREIGN KEY(device_id) REFERENCES devices(device_id)
         )",
         (),
     )?;
+
+    // Safe migration if is_favorite column does not exist
+    let _ = conn.execute("ALTER TABLE synced_media ADD COLUMN is_favorite INTEGER DEFAULT 0", ());
 
     // Create indexes for fast lookup
     conn.execute(
@@ -81,6 +86,10 @@ pub fn init_db(db_path: PathBuf) -> Result<Connection> {
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_device_remote ON synced_media(device_id, remote_path)",
+        (),
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_media_fav ON synced_media(is_favorite)",
         (),
     )?;
 
@@ -107,6 +116,9 @@ fn seed_default_settings(conn: &Connection) -> Result<()> {
         ("organize_by_date", "true"),
         ("date_format", "YYYY/MM"),
         ("auto_sync_on_connect", "false"),
+        ("auto_sync_interval_mins", "0"),
+        ("min_battery_threshold", "20"),
+        ("sound_alerts_enabled", "true"),
         ("delete_after_sync", "false"),
         ("skip_duplicates", "true"),
         ("include_videos", "true"),
@@ -180,12 +192,28 @@ pub fn is_file_synced(conn: &Connection, file_hash: &str) -> bool {
     stmt.exists(params![file_hash]).unwrap_or(false)
 }
 
+pub fn is_remote_path_or_hash_synced(conn: &Connection, device_id: &str, remote_path: &str) -> bool {
+    let mut stmt = match conn.prepare("SELECT 1 FROM synced_media WHERE device_id = ?1 AND remote_path = ?2 LIMIT 1") {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    stmt.exists(params![device_id, remote_path]).unwrap_or(false)
+}
+
+pub fn unsync_media_by_remote_path(conn: &Connection, device_id: &str, remote_path: &str) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM synced_media WHERE device_id = ?1 AND remote_path = ?2",
+        params![device_id, remote_path],
+    )
+}
+
 pub fn record_synced_file(conn: &Connection, item: &NewSyncedMedia) -> Result<i64> {
     conn.execute(
         "INSERT INTO synced_media (
             device_id, remote_object_id, remote_path, local_path, 
-            file_size_bytes, file_hash_sha256, media_created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            file_size_bytes, file_hash_sha256, media_created_at, is_favorite
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
         params![
             item.device_id,
             item.remote_object_id,
@@ -199,16 +227,54 @@ pub fn record_synced_file(conn: &Connection, item: &NewSyncedMedia) -> Result<i6
     Ok(conn.last_insert_rowid())
 }
 
-pub fn get_recent_synced_media(conn: &Connection, limit: usize) -> Result<Vec<SyncedMediaItem>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, device_id, remote_path, local_path, file_size_bytes, file_hash_sha256, media_created_at, synced_at, deleted_from_phone
-         FROM synced_media
-         ORDER BY id DESC
-         LIMIT ?1"
+pub fn toggle_favorite(conn: &Connection, media_id: i64) -> Result<bool> {
+    conn.execute(
+        "UPDATE synced_media SET is_favorite = CASE WHEN is_favorite = 1 THEN 0 ELSE 1 END WHERE id = ?1",
+        params![media_id],
     )?;
 
-    let rows = stmt.query_map(params![limit as i64], |row| {
+    let mut stmt = conn.prepare("SELECT is_favorite FROM synced_media WHERE id = ?1")?;
+    let fav: i32 = stmt.query_row(params![media_id], |row| row.get(0)).unwrap_or(0);
+    Ok(fav == 1)
+}
+
+pub fn get_recent_synced_media(conn: &Connection, limit: usize) -> Result<Vec<SyncedMediaItem>> {
+    get_synced_media(conn, Some(limit), None, false)
+}
+
+pub fn get_synced_media(
+    conn: &Connection,
+    limit: Option<usize>,
+    device_id: Option<&str>,
+    favorites_only: bool,
+) -> Result<Vec<SyncedMediaItem>> {
+    let mut query = String::from(
+        "SELECT id, device_id, remote_path, local_path, file_size_bytes, file_hash_sha256, media_created_at, synced_at, deleted_from_phone, COALESCE(is_favorite, 0)
+         FROM synced_media
+         WHERE 1=1 "
+    );
+
+    if let Some(dev) = device_id {
+        if !dev.is_empty() {
+            query.push_str(&format!(" AND device_id = '{}' ", dev.replace('\'', "''")));
+        }
+    }
+
+    if favorites_only {
+        query.push_str(" AND is_favorite = 1 ");
+    }
+
+    query.push_str(" ORDER BY id DESC ");
+
+    if let Some(l) = limit {
+        query.push_str(&format!(" LIMIT {} ", l));
+    }
+
+    let mut stmt = conn.prepare(&query)?;
+
+    let rows = stmt.query_map([], |row| {
         let deleted_int: i32 = row.get(8)?;
+        let fav_int: i32 = row.get(9)?;
         Ok(SyncedMediaItem {
             id: row.get(0)?,
             device_id: row.get(1)?,
@@ -219,6 +285,7 @@ pub fn get_recent_synced_media(conn: &Connection, limit: usize) -> Result<Vec<Sy
             media_created_at: row.get(6)?,
             synced_at: row.get(7)?,
             deleted_from_phone: deleted_int == 1,
+            is_favorite: fav_int == 1,
         })
     })?;
 
@@ -229,6 +296,11 @@ pub fn get_recent_synced_media(conn: &Connection, limit: usize) -> Result<Vec<Sy
         }
     }
     Ok(result)
+}
+
+pub fn clear_all_sync_history(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM synced_media", ())?;
+    Ok(())
 }
 
 pub fn get_storage_stats(conn: &Connection) -> Result<StorageStats> {
@@ -263,9 +335,3 @@ pub fn get_storage_stats(conn: &Connection) -> Result<StorageStats> {
         last_sync_timestamp: last_sync,
     })
 }
-
-pub fn clear_all_sync_history(conn: &Connection) -> Result<()> {
-    conn.execute("DELETE FROM synced_media", ())?;
-    Ok(())
-}
-
