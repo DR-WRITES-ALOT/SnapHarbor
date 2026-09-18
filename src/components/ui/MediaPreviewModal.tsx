@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import type { DiscoveredMediaFile } from "../../types";
+import { canLoadLocalFile, resolveMediaSrc } from "../../services/mediaUrl";
 
 interface MediaPreviewModalProps {
   mediaList: DiscoveredMediaFile[];
@@ -35,9 +36,15 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
   onUnsync,
 }) => {
   const [zoom, setZoom] = useState(1);
+  const [mediaFailed, setMediaFailed] = useState(false);
 
   const currentItem = mediaList[currentIndex];
   const total = mediaList.length;
+
+  // Reset the failed state whenever the user navigates to another item
+  useEffect(() => {
+    setMediaFailed(false);
+  }, [currentIndex]);
 
   const handlePrev = () => {
     if (currentIndex > 0) {
@@ -114,18 +121,35 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
             className="w-full h-full flex items-center justify-center transition-transform duration-200"
             style={{ transform: `scale(${zoom})` }}
           >
-            {currentItem.is_video ? (
+            {mediaFailed || !canLoadLocalFile(currentItem.source_path) ? (
               <div className="flex flex-col items-center gap-4 text-content-secondary">
                 <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center text-white">
-                  <Video size={36} />
+                  {currentItem.is_video ? <Video size={36} /> : <ImageIcon size={36} />}
                 </div>
                 <span className="text-sm font-medium">{currentItem.name}</span>
-                <span className="text-xs opacity-60">Video Preview Available on Local Storage</span>
+                <span className="text-xs opacity-60 text-center max-w-sm">
+                  {canLoadLocalFile(currentItem.source_path)
+                    ? "This file could not be opened. It may have been moved, renamed, or deleted outside SnapHarbor."
+                    : "Run the desktop app to preview media — files are read directly from your vault."}
+                </span>
+                <span className="font-mono text-[10px] opacity-50 break-all max-w-lg text-center">
+                  {currentItem.source_path}
+                </span>
               </div>
+            ) : currentItem.is_video ? (
+              <video
+                src={resolveMediaSrc(currentItem.source_path)}
+                controls
+                autoPlay
+                playsInline
+                onError={() => setMediaFailed(true)}
+                className="max-w-full max-h-full"
+              />
             ) : (
               <img
-                src={`https://picsum.photos/seed/${currentIndex + 120}/1200/800`}
+                src={resolveMediaSrc(currentItem.source_path)}
                 alt={currentItem.name}
+                onError={() => setMediaFailed(true)}
                 className="max-w-full max-h-full object-contain select-none"
               />
             )}
